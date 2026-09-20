@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  database:
+    name: Database, isolation harness and restore drill
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # The harness needs a real Postgres: RLS, policies and grants cannot be faked
+    # by a mock, and a test double would prove nothing about tenant isolation.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: dineflow_local_only
+          POSTGRES_DB: dineflow
+        ports: ['55432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d dineflow"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://postgres:dineflow_local_only@localhost:55432/dineflow
+      DINEFLOW_PG_CONTAINER: ${{ job.services.postgres.id }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install age (backup encryption)
+        run: sudo apt-get update && sudo apt-get install -y age
+
+      - name: Apply migrations
+        run: node packages/db/src/migrate.ts
+
+      # Gate: tenant isolation, schema guards, and the canaries that prove the
+      # harness still detects breakage. A failure here blocks the merge.
+      - name: Tenant isolation harness
+        run: node packages/db/test/run.ts
+
+      - name: Restore drill
+        run: node scripts/restore-drill/run.mjs
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

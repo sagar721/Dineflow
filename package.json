@@ -1,0 +1,23 @@
+{
+  "name": "dineflow",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "db:up": "node scripts/db-docker.mjs up",
+    "db:down": "node scripts/db-docker.mjs down",
+    "db:migrate": "node --experimental-strip-types packages/db/src/migrate.ts",
+    "test": "npm run test --workspace @dineflow/db",
+    "harness": "npm run harness --workspace @dineflow/db",
+    "restore-drill": "node scripts/restore-drill/run.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.23.0"
+  }
+}

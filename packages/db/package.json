@@ -1,0 +1,13 @@
+{
+  "name": "@dineflow/db",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "migrate": "node src/migrate.ts",
+    "harness": "node test/run.ts",
+    "test": "node test/run.ts"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  }
+}
