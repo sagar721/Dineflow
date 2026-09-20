@@ -13,9 +13,12 @@
     "db:up": "node scripts/db-docker.mjs up",
     "db:down": "node scripts/db-docker.mjs down",
     "db:migrate": "node --experimental-strip-types packages/db/src/migrate.ts",
-    "test": "npm run test --workspace @dineflow/db",
+    "test": "npm run test -w @dineflow/shared && npm run test -w @dineflow/web",
     "harness": "npm run harness --workspace @dineflow/db",
-    "restore-drill": "node scripts/restore-drill/run.mjs"
+    "restore-drill": "node scripts/restore-drill/run.mjs",
+    "dev": "npm run dev -w @dineflow/web",
+    "build": "npm run build -w @dineflow/web",
+    "test:db": "npm run harness -w @dineflow/db"
   },
   "dependencies": {
     "pg": "^8.23.0"

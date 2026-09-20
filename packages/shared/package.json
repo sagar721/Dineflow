@@ -1,0 +1,7 @@
+{
+  "name": "@dineflow/shared",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": { "test": "node --test src/*.test.ts" }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@dineflow/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && VITE_ALLOW_DEMO_DATA=1 vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview",
+    "smoke": "VITE_ALLOW_DEMO_DATA=1 vite build --ssr src/smoke.tsx --outDir dist-ssr --logLevel warn && node dist-ssr/smoke.js",
+    "contrast": "node scripts/contrast-check.mjs",
+    "test": "node scripts/contrast-check.mjs && npm run smoke"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.6.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "lucide-react": "^1.47.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  },
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router": "^7.18.4"
+  }
+}
