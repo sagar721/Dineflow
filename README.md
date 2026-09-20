@@ -6,6 +6,7 @@ Multi-tenant QR ordering and basic billing for restaurants and cafés.
 
 | What | Where |
 |---|---|
+| **Status report** | **[docs/STATUS.md](docs/STATUS.md)** |
 | Product requirements | [docs/PRD.md](docs/PRD.md) |
 | Technical design (7 parts) | [docs/design/](docs/design/) |
 | Conditions from the Stage 2 review | [docs/design/07-stage2-conditions.md](docs/design/07-stage2-conditions.md) |
