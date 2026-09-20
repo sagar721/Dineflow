@@ -87,6 +87,14 @@ function insertFor(spec: TableSpec, restaurantId: string, userId: string, acting
                params: [restaurantId] };
     case 'platform_admins':
       return { sql: `insert into platform_admins (user_id) values ($1)`, params: [userId] };
+    case 'invitations':
+      return { sql: `insert into invitations (restaurant_id, email, role, token_hash, invited_by, expires_at)
+                     values ($1, 'probe-invite@example.test', 'kitchen', $2, $3, now() + interval '72 hours')`,
+               // The inviter can only ever be the caller: the policy requires it.
+               params: [restaurantId, Buffer.from(`probe-${Math.random()}`), actingUserId] };
+    case 'auth_lockouts':
+      return { sql: `insert into auth_lockouts (key_hash, key_kind) values ($1, 'ip')`,
+               params: [Buffer.from(`probe-${Math.random()}`)] };
     default:
       throw new Error(`no insert probe declared for ${spec.table}`);
   }
@@ -104,6 +112,10 @@ function updateFor(spec: TableSpec, restaurantId: string): { sql: string; params
       return { sql: `update audit_log set action = 'probe.tampered' where restaurant_id = $1`, params: [restaurantId] };
     case 'platform_admins':
       return { sql: `update platform_admins set created_at = now() where user_id is not null`, params: [] };
+    case 'invitations':
+      return { sql: `update invitations set revoked_at = now() where restaurant_id = $1`, params: [restaurantId] };
+    case 'auth_lockouts':
+      return { sql: `update auth_lockouts set failures = failures + 1 where key_kind = 'ip'`, params: [] };
     default:
       throw new Error(`no update probe declared for ${spec.table}`);
   }

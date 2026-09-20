@@ -12,6 +12,7 @@ export type Finding = { check: string; object: string; detail: string };
 export const NON_TENANT_TABLES = new Set([
   'restaurants',        // the tenant root itself
   'platform_admins',    // platform-level, not owned by a restaurant
+  'auth_lockouts',      // brute-force counters, keyed by hashed identifier, no tenant
   'schema_migrations',  // infrastructure
 ]);
 
@@ -24,6 +25,13 @@ export const ALLOWED_DEFINER_FUNCTIONS = new Set([
   'app.has_support_grant',
   'app.assert_owner_remains',
   'app.support_grant_immutable',
+  'app.invitation_immutable',
+  'app.lookup_invitation',
+  'app.accept_invitation',
+  'app.register_auth_failure',
+  'app.check_auth_lock',
+  'app.clear_auth_failures',
+  'app.record_auth_event',
 ]);
 
 /** Roles that must never hold privileges on DineFlow tables (Part 7 §3, F-1/F-7). */

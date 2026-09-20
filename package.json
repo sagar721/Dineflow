@@ -18,9 +18,14 @@
     "restore-drill": "node scripts/restore-drill/run.mjs",
     "dev": "npm run dev -w @dineflow/web",
     "build": "npm run build -w @dineflow/web",
-    "test:db": "npm run harness -w @dineflow/db"
+    "test:db": "npm run harness -w @dineflow/db",
+    "test:api": "npm run test -w @dineflow/api",
+    "typecheck": "tsc --noEmit -p apps/api/tsconfig.json && tsc --noEmit -p apps/web/tsconfig.json"
   },
   "dependencies": {
     "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
   }
 }

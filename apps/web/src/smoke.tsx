@@ -2,31 +2,44 @@
 // that it compiles. Built with `vite build --ssr` and run in Node by `npm run smoke`.
 import { renderToString } from 'react-dom/server';
 import { MemoryRouter, Route, Routes } from 'react-router';
+import { SessionProvider } from '@/features/auth/SessionProvider.tsx';
+import { LoginPage } from '@/features/auth/LoginPage.tsx';
+import { AcceptInvitePage } from '@/features/auth/AcceptInvitePage.tsx';
 import { AppShell } from '@/app/AppShell.tsx';
 import { DashboardPage } from '@/features/dashboard/DashboardPage.tsx';
 import { DesignPage } from '@/features/design/DesignPage.tsx';
 import { NotFoundPage } from '@/app/NotFoundPage.tsx';
 
-const routes = ['/', '/design', '/orders'];
+const routes = ['/', '/design', '/orders', '/login', '/accept-invite'];
 let failures = 0;
 
 for (const route of routes) {
   try {
+    const signedOut = route === '/login' || route === '/accept-invite';
     const html = renderToString(
       <MemoryRouter initialEntries={[route]}>
-        <AppShell>
-          <Routes>
-            <Route path="/" element={<DashboardPage />} />
-            <Route path="/design" element={<DesignPage />} />
-            <Route path="*" element={<NotFoundPage />} />
-          </Routes>
-        </AppShell>
+        <SessionProvider>
+          {signedOut ? (
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/accept-invite" element={<AcceptInvitePage />} />
+            </Routes>
+          ) : (
+            <AppShell>
+              <Routes>
+                <Route path="/" element={<DashboardPage />} />
+                <Route path="/design" element={<DesignPage />} />
+                <Route path="*" element={<NotFoundPage />} />
+              </Routes>
+            </AppShell>
+          )}
+        </SessionProvider>
       </MemoryRouter>,
     );
 
     const checks: [string, boolean][] = [
       ['renders markup', html.length > 500],
-      ['has a skip link', html.includes('Skip to main content')],
+      ['has a skip link', signedOut || html.includes('Skip to main content')],
       ['has one h1', (html.match(/<h1/g) ?? []).length === 1],
       ['no unresolved React placeholders', !html.includes('[object Object]')],
     ];
@@ -43,6 +56,22 @@ for (const route of routes) {
     }
     if (route === '/orders') {
       checks.push(['unbuilt route says so', html.includes('Nothing is built at /orders')]);
+    }
+    if (route === '/login') {
+      checks.push(['password field is a password input', html.includes('type="password"')]);
+      // React preserves the camelCase spelling in its SSR output; browsers match
+      // attribute names case-insensitively, so compare that way.
+      checks.push(['autocomplete hints present', /autocomplete="current-password"/i.test(html)]);
+      checks.push(['username hint present', /autocomplete="username"/i.test(html)]);
+      checks.push(['labels are wired to inputs', /<label[^>]+for="[^"]+"/.test(html)]);
+      checks.push(['no token or secret in the markup', !/eyJ|secret|service-key/i.test(html)]);
+    }
+    if (route === '/accept-invite') {
+      // The form appears only after the link has been checked with the server, so
+      // before that there must be no password field to fill in.
+      checks.push(['no password field before the link is verified', !/type="password"/i.test(html)]);
+      checks.push(['shows a busy state while checking', html.includes('aria-busy')]);
+      checks.push(['no invitation token in the markup', !html.includes('#token=')]);
     }
 
     for (const [name, passed] of checks) {

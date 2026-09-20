@@ -4,6 +4,7 @@
 // right number of rows" but "no marker belonging to another tenant appears
 // anywhere in the result", which catches leaks that a count-based assertion misses.
 import pg from 'pg';
+import { createHash } from 'node:crypto';
 
 export const MARKER = {
   A: 'MARKER-TENANT-A',
@@ -24,7 +25,8 @@ export type Fixtures = {
 /** Truncates DineFlow data (never the schema) and rebuilds the fixture set. */
 export async function seed(admin: pg.Client): Promise<Fixtures> {
   await admin.query(`
-    truncate audit_log, support_grants, restaurant_users, platform_admins, restaurants restart identity cascade;
+    truncate audit_log, invitations, auth_lockouts, support_grants, restaurant_users,
+             platform_admins, restaurants restart identity cascade;
     delete from auth.users;
   `);
 
@@ -82,6 +84,16 @@ export async function seed(admin: pg.Client): Promise<Fixtures> {
     `insert into support_grants (restaurant_id, admin_user_id, reason, created_at, expires_at)
      values ($1, $2, $3, now() - interval '5 hours', now() - interval '1 hour')`,
     [restaurantB, adminPlain, `${MARKER.B} expired support access`]);
+
+  // A pending invitation per restaurant, so isolation probes have something to leak.
+  for (const [rid, inviter, marker] of [
+    [restaurantA, ownerA, 'a'], [restaurantB, ownerB, 'b'], [restaurantS, ownerS, 's'],
+  ] as const) {
+    await admin.query(
+      `insert into invitations (restaurant_id, email, role, token_hash, invited_by, expires_at)
+       values ($1, $2, 'kitchen', $3, $4, now() + interval '72 hours')`,
+      [rid, `invited-${marker}@example.test`, createHash('sha256').update(`fixture-token-${marker}`).digest(), inviter]);
+  }
 
   for (const [rid, marker] of [[restaurantA, MARKER.A], [restaurantB, MARKER.B], [restaurantS, MARKER.S]] as const) {
     await admin.query(

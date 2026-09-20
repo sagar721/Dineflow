@@ -149,6 +149,50 @@ export const TABLES: TableSpec[] = [
     },
   },
   {
+    table: 'invitations',
+    tenantColumn: 'restaurant_id',
+    markerColumn: 'email::text',
+    cells: {
+      // Only the roles that may manage staff can see who has been invited; an
+      // invitation reveals an email address and a role about to be granted.
+      'owner-A':        { read: 'own',  insertOwn: 'allow', updateOwn: 'allow' },
+      'manager-A':      { read: 'own',  insertOwn: 'allow', updateOwn: 'allow' },
+      'kitchen-A':      deny('none'),
+      'billing-A':      deny('none'),
+      'deactivated-A':  deny('none'),
+      'owner-S':        deny('none'),
+      'owner-B':        { read: 'own',  insertOwn: 'allow', updateOwn: 'allow' },
+      'admin-no-mfa':   deny('none'),
+      'admin':          deny('none'),   // platform admins do not read tenant staff data
+      'admin-granted':  deny('none'),   // support access is read-only and excludes invitations
+      'public-A':       deny('none'),
+      'public-none':    deny('none'),
+      'api-no-context': deny('none'),
+    },
+  },
+  {
+    table: 'auth_lockouts',
+    tenantColumn: 'key_kind',
+    markerColumn: 'key_kind',
+    cells: {
+      // Brute-force counters are reachable only through SECURITY DEFINER functions
+      // called by the API's login role, because the caller is not yet authenticated.
+      'owner-A':        deny('none'),
+      'manager-A':      deny('none'),
+      'kitchen-A':      deny('none'),
+      'billing-A':      deny('none'),
+      'deactivated-A':  deny('none'),
+      'owner-S':        deny('none'),
+      'owner-B':        deny('none'),
+      'admin-no-mfa':   deny('none'),
+      'admin':          deny('none'),
+      'admin-granted':  deny('none'),
+      'public-A':       deny('none'),
+      'public-none':    deny('none'),
+      'api-no-context': deny('none'),
+    },
+  },
+  {
     table: 'platform_admins',
     tenantColumn: 'user_id',
     markerColumn: 'user_id::text',

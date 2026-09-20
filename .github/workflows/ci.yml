@@ -53,6 +53,14 @@ jobs:
       - name: Restore drill
         run: node scripts/restore-drill/run.mjs
 
+      # API integration tests: real Express, real Postgres with real RLS, and a stub
+      # identity provider. No Supabase account is needed to run them.
+      - name: API tests (auth, sessions, invitations, isolation)
+        run: npm run test -w @dineflow/api
+
+      - name: API typecheck
+        run: npx tsc --noEmit -p apps/api/tsconfig.json
+
   web:
     name: Shared logic, web build and design checks
     runs-on: ubuntu-latest
