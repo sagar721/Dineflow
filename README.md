@@ -2,7 +2,7 @@
 
 Multi-tenant QR ordering and basic billing for restaurants and cafés.
 
-**Status: Stage 2 approved with conditions; foundation and tenant-isolation harness built and verified. No application code (API or web app) exists yet.**
+**Status: Stage 3 complete and awaiting approval.** The database foundation, the tenant-isolation harness and the design-system scaffold are built and verified. There is no API yet, so the dashboard shows clearly-labelled placeholder data.
 
 | What | Where |
 |---|---|
@@ -12,6 +12,8 @@ Multi-tenant QR ordering and basic billing for restaurants and cafés.
 | Database migrations | [packages/db/migrations/](packages/db/migrations/) |
 | Tenant-isolation harness | [packages/db/test/](packages/db/test/) |
 | Restore drill | [scripts/restore-drill/](scripts/restore-drill/) |
+| Design system | [docs/design/08-design-system.md](docs/design/08-design-system.md) · [apps/web](apps/web) |
+| Shared logic (money, order states) | [packages/shared/src](packages/shared/src) |
 
 ## Requirements
 
@@ -31,6 +33,23 @@ npm run db:down      # remove the container
 ```
 
 `npm run harness` exits non-zero on any failure and is the merge gate in CI.
+
+### Web app
+
+```bash
+npm run dev            # http://localhost:5173 — dashboard and /design reference
+npm run build          # strict typecheck + production build
+npm test               # shared unit tests, token contrast, render smoke test
+```
+
+Two routes exist: `/` (dashboard) and `/design` (every component in every state, with a
+light/dark toggle for the kitchen theme). Every other route says plainly that its module
+has not been built.
+
+**Demo data:** the dashboard uses placeholder data from `demo-data.ts`, which refuses to
+load in a production build unless `VITE_ALLOW_DEMO_DATA` is set. The scaffold sets it in
+the build script; delete that flag when the orders module lands and the guard starts
+protecting customers automatically.
 
 ## What the harness checks
 

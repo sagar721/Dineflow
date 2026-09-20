@@ -3,7 +3,8 @@
 | | |
 |---|---|
 | **Version** | 0.1 (for approval) |
-| **Scope** | The design language and component contract. Implementation lands with the web scaffold in module 5; nothing here has been rendered or tested yet. |
+| **Scope** | The design language, the component contract, and the scaffold that implements them. |
+| **Status** | **Built and verified.** Tokens, brand, 11 components, the app shell, the dashboard and a living `/design` reference exist in [apps/web](../../apps/web). Verification results are in §9. |
 | **Constraint** | Three audiences with different physical conditions: a customer on their own phone, staff on a counter tablet, and a kitchen screen read from arm's length with wet hands. One token set, three densities. |
 
 ---
@@ -26,40 +27,35 @@ Tokens are CSS custom properties on `:root`, consumed by Tailwind through its th
 
 Neutrals carry the interface; one brand hue carries identity; status colours are reserved for status.
 
+Tokens live in [`apps/web/src/styles/tokens.css`](../../apps/web/src/styles/tokens.css) and are declared in Tailwind's `@theme`, so `--color-brand` becomes `bg-brand` / `text-brand` and a component never writes a hex value. The kitchen theme redefines the same names under `[data-theme='dark']`, so a component written once works on both surfaces.
+
 ```css
-:root {
-  /* neutrals (slate-based, warm-neutral) */
-  --df-bg:            #f7f8fa;   --df-surface:      #ffffff;
-  --df-surface-2:     #f1f3f7;   --df-border:       #dfe3ea;
-  --df-text:          #11151c;   --df-text-muted:   #5a6474;
-  --df-text-inverse:  #ffffff;
+@theme {
+  --color-bg: #f7f8fa;          --color-surface: #ffffff;
+  --color-surface-2: #f1f3f7;   --color-border: #dfe3ea;
+  --color-border-strong: #8a94a4;  /* 3.06:1 on white — input boundaries */
+  --color-text: #11151c;        --color-muted: #5a6474;
+  --color-inverse: #ffffff;
 
-  /* brand (product default; per-restaurant accent overrides --df-accent only) */
-  --df-brand:         #1f6f5c;   --df-brand-hover:  #185a4a;
-  --df-brand-subtle:  #e6f2ee;
-  --df-accent:        var(--df-brand);
+  --color-brand: #1f6f5c;       --color-brand-hover: #185a4a;
+  --color-brand-subtle: #e6f2ee;
 
-  /* status */
-  --df-success:       #17683f;   --df-success-bg:   #e6f4ec;
-  --df-warning:       #8a5a00;   --df-warning-bg:   #fdf2dc;
-  --df-danger:        #a3231f;   --df-danger-bg:    #fbeae9;
-  --df-info:          #1b5a97;   --df-info-bg:      #e7f0f9;
+  --color-success: #17683f;     --color-success-bg: #e6f4ec;
+  --color-warning: #8a5a00;     --color-warning-bg: #fdf2dc;
+  --color-danger:  #a3231f;     --color-danger-bg:  #fbeae9;
+  --color-info:    #1b5a97;     --color-info-bg:    #e7f0f9;
+  --color-focus:   #1b5a97;
 
-  /* order status — deliberately distinct in hue AND shape/label, never colour alone */
-  --df-status-pending:   var(--df-warning);
-  --df-status-accepted:  var(--df-info);
-  --df-status-preparing: #6a4bab;
-  --df-status-ready:     var(--df-success);
-  --df-status-served:    var(--df-text-muted);
-  --df-status-cancelled: var(--df-danger);
-
-  --df-focus:         #1b5a97;   /* 3:1 against every surface it sits on */
+  /* order status: a distinct hue per status, always paired with its label */
+  --color-status-pending: #8a5a00;    --color-status-accepted: #1b5a97;
+  --color-status-preparing: #5b3fa0;  --color-status-ready: #17683f;
+  --color-status-served: #5a6474;     --color-status-cancelled: #a3231f;
 }
 ```
 
 Dark mode is defined for the **kitchen screen only** in v1 (it often runs in a dim corner and all night). Admin and customer screens are light. Dark tokens redefine surfaces and text under `[data-theme="dark"]`, never the semantics.
 
-**Contrast rules (enforced, not aspirational):** body text ≥ 4.5:1, large text and icons ≥ 3:1, focus ring ≥ 3:1 against the adjacent surface. A restaurant's accent colour is passed through a contrast check on save; if text on it would fail, the system uses the accent for borders and fills only and keeps text at `--df-text`. Colour never carries meaning alone — every status has a label, and order-status chips differ in text as well as hue.
+**Contrast rules (enforced by a script, not by good intentions):** body text ≥ 4.5:1, large text, icons, focus rings and control boundaries ≥ 3:1. `npm run contrast -w @dineflow/web` reads the real token values out of the CSS and checks 22 pairs in each theme; it runs in CI and fails the build. Current results: 44/44 pass (§9). A restaurant's accent colour is passed through a contrast check on save; if text on it would fail, the system uses the accent for borders and fills only and keeps text at `--df-text`. Colour never carries meaning alone — every status has a label, and order-status chips differ in text as well as hue.
 
 ### 2.2 Typography
 
@@ -96,6 +92,8 @@ Admin shell: sidebar on `lg+`, bottom tab bar below. Content max width 1200 px; 
 ## 3. Component inventory
 
 Every component ships with: all states (default, hover, focus-visible, active, disabled, loading, error, read-only), keyboard operation, an accessible name, and a documented prop contract. "Done" means all of those, not just the default state.
+
+**Built so far (11):** Button, IconButton, Card (+ Header, Body), Badge, Field + Input, MoneyText, OrderStatusChip, StatTile, EmptyState, Skeleton, LiveIndicator, DemoBanner, plus AppShell and Page. The rest of this table is the planned inventory, delivered with the module that first needs it — building a Combobox before anything uses it would be guesswork.
 
 | Group | Components |
 |---|---|
@@ -159,8 +157,36 @@ A restaurant supplies a logo and one accent colour. The system derives hover and
 - Icons from one set (Lucide), tree-shaken, always paired with text or an `aria-label`.
 - A `/design` route renders every component in every state as a living reference and is the target for axe and visual checks.
 
-## 8. What still needs your input
+## 8. Brand identity (as built)
 
-1. **Product palette.** The green above is a placeholder chosen for contrast and neutrality. If DineFlow has brand colours, say so now — changing them later is cheap, but printed material is not.
-2. **Kitchen dark mode:** confirmed as the only dark surface in v1?
-3. **Logo and product name treatment** for the landing page and bills.
+**Name:** DineFlow. **Mark:** a plate seen from above with a flow line through it — the plate says restaurant, the line says the order moving table → kitchen → bill. Two shapes, so it still reads at 16 px as a favicon. Drawn in `currentColor`, so it inherits whatever surface it sits on.
+
+**Wordmark:** "Dine" in `--color-text`, "Flow" in `--color-brand`, Inter semibold, tight tracking.
+
+**Palette:** a deep green-teal (`#1f6f5c`). Chosen because it reads as fresh and food-adjacent without being the red every delivery app uses, it holds 6.02:1 against white for text and 6.02:1 as a button fill, and it stays distinguishable from the success green used for "Ready" (`#17683f`) at chip size. The kitchen theme lightens it to `#3fa88c` for dark surfaces.
+
+**Typography:** Inter with a system fallback stack; tabular numerals mandatory for money and quantities.
+
+Files: [`apps/web/src/brand/Logo.tsx`](../../apps/web/src/brand/Logo.tsx), [`apps/web/src/styles/tokens.css`](../../apps/web/src/styles/tokens.css).
+
+## 9. What was verified (executed 2026-09-20)
+
+| Check | Result |
+|---|---|
+| Design token contrast, both themes, 44 pairs (`npm run contrast -w @dineflow/web`) | **44/44 pass** |
+| Render smoke test over 3 routes, 19 assertions (`npm run smoke -w @dineflow/web`) | **19/19 pass** |
+| Shared unit tests — money and rounding (`npm run test -w @dineflow/shared`) | **5/5 pass** |
+| TypeScript strict typecheck and production build | **passes**, 81.7 kB gzipped framework chunk + 3.4 kB app |
+
+**Defects these checks caught during the build**, all fixed:
+1. The contrast script's own CSS parser silently matched the wrong block and scored the light theme as "missing tokens" — it was reporting nothing while appearing to run.
+2. Four dark-theme pairs genuinely failed: white text on the lightened brand and danger fills (2.92:1 and 2.68:1), error text on a light background token that was never overridden for dark (2.31:1), and input borders at 1.82:1.
+3. Input borders in the light theme failed the 3:1 non-text minimum, because the control used the hairline `--color-border` rather than a boundary colour.
+
+**Not yet run:** axe-core and screen-reader passes (they need a browser driver, which arrives with the E2E setup), real-device checks on iOS Safari, and print output on a thermal printer.
+
+## 10. What still needs your input
+
+1. **Product palette.** The green is my choice, made for contrast and to avoid the delivery-app red. If DineFlow has brand colours, say so now — changing tokens is cheap, reprinting QR cards and bills is not.
+2. **Kitchen dark mode** as the only dark surface in v1: confirm.
+3. **The mark.** It is deliberately plain so it survives a favicon and a thermal printer. If you want something more distinctive, this is the moment.
