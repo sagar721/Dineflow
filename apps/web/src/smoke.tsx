@@ -8,17 +8,19 @@ import { AcceptInvitePage } from '@/features/auth/AcceptInvitePage.tsx';
 import { OnboardingPage } from '@/features/onboarding/OnboardingPage.tsx';
 import { TablesPage } from '@/features/tables/TablesPage.tsx';
 import { TableEntryPage } from '@/features/public/TableEntryPage.tsx';
+import { SecurityPage } from '@/features/auth/SecurityPage.tsx';
+import { ResetPasswordPage } from '@/features/auth/ResetPasswordPage.tsx';
 import { AppShell } from '@/app/AppShell.tsx';
 import { DashboardPage } from '@/features/dashboard/DashboardPage.tsx';
 import { DesignPage } from '@/features/design/DesignPage.tsx';
 import { NotFoundPage } from '@/app/NotFoundPage.tsx';
 
-const routes = ['/', '/design', '/orders', '/login', '/accept-invite', '/setup', '/tables', '/t/sample-token'];
+const routes = ['/', '/design', '/orders', '/login', '/accept-invite', '/setup', '/tables', '/t/sample-token', '/security', '/reset-password'];
 let failures = 0;
 
 for (const route of routes) {
   try {
-    const signedOut = route === '/login' || route === '/accept-invite' || route.startsWith('/t/');
+    const signedOut = route === '/login' || route === '/accept-invite' || route.startsWith('/t/') || route === '/reset-password';
     const html = renderToString(
       <MemoryRouter initialEntries={[route]}>
         <SessionProvider>
@@ -27,6 +29,7 @@ for (const route of routes) {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/accept-invite" element={<AcceptInvitePage />} />
               <Route path="/t/:token" element={<TableEntryPage />} />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
             </Routes>
           ) : (
             <AppShell>
@@ -35,6 +38,7 @@ for (const route of routes) {
                 <Route path="/design" element={<DesignPage />} />
                 <Route path="/setup" element={<OnboardingPage />} />
                 <Route path="/tables" element={<TablesPage />} />
+                <Route path="/security" element={<SecurityPage />} />
                 <Route path="*" element={<NotFoundPage />} />
               </Routes>
             </AppShell>
@@ -67,6 +71,18 @@ for (const route of routes) {
       // rather than an empty shell or a crash.
       checks.push(['setup renders without a session', html.length > 500]);
       checks.push(['setup shows a busy state', html.includes('aria-busy')]);
+    }
+    if (route === '/security') {
+      checks.push(['security page has its heading while loading', html.includes('Account security')]);
+      checks.push(['security page shows a busy state', html.includes('aria-busy')]);
+      checks.push(['no authenticator key in the initial markup', !/[A-Z2-7]{32}/.test(html)]);
+    }
+    if (route === '/reset-password') {
+      checks.push(['reset page asks for an email when opened without a link', html.includes('type="email"')]);
+      checks.push(['reset page has a heading', html.includes('Reset your password')]);
+    }
+    if (route === '/login') {
+      checks.push(['sign-in offers a way to reset the password', html.includes('/reset-password')]);
     }
     if (route === '/tables') {
       checks.push(['tables page has its heading while loading', html.includes('Tables &amp; QR')]);

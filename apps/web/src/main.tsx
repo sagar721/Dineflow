@@ -12,6 +12,8 @@ import { SessionProvider } from '@/features/auth/SessionProvider.tsx';
 import { OnboardingPage } from '@/features/onboarding/OnboardingPage.tsx';
 import { TablesPage } from '@/features/tables/TablesPage.tsx';
 import { TableEntryPage } from '@/features/public/TableEntryPage.tsx';
+import { SecurityPage } from '@/features/auth/SecurityPage.tsx';
+import { ResetPasswordPage } from '@/features/auth/ResetPasswordPage.tsx';
 import '@/styles/tokens.css';
 
 const root = document.getElementById('root');
@@ -26,6 +28,7 @@ createRoot(root).render(
               sign in has no navigation to use. */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/accept-invite" element={<AcceptInvitePage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           {/* What a customer's phone opens after scanning a table's QR code. No
               session, no app shell: a customer is not a member of staff. */}
           <Route path="/t/:token" element={<TableEntryPage />} />
@@ -36,6 +39,7 @@ createRoot(root).render(
               <AppShell>
                 <Routes>
                   <Route path="/" element={<RequireAuth><DashboardPage /></RequireAuth>} />
+                  <Route path="/security" element={<RequireAuth><SecurityPage /></RequireAuth>} />
                   <Route
                     path="/tables"
                     element={<RequireAuth permission="table.read"><TablesPage /></RequireAuth>}

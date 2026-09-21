@@ -18,7 +18,7 @@ Multi-tenant QR ordering and basic billing for restaurants and cafés.
 
 ## Requirements
 
-- Node 22+ (this repo runs TypeScript directly; no build step for the database package)
+- Node 24 (see `.nvmrc`; 22.18+ also works). The repo runs TypeScript directly, with no build step for the API or the database package
 - Docker (for the disposable Postgres the tests use)
 - [`age`](https://github.com/FiloSottile/age) (backup encryption in the restore drill): `brew install age`
 
@@ -38,7 +38,8 @@ npm run db:down      # remove the container
 ### Web app
 
 ```bash
-npm run dev            # http://localhost:5173 — dashboard and /design reference
+npm run dev:api        # API on http://localhost:4000 (reads .env)
+npm run dev:web        # http://localhost:5180 — dedicated port, fails loudly if taken
 npm run build          # strict typecheck + production build
 npm test               # shared unit tests, token contrast, render smoke test
 ```

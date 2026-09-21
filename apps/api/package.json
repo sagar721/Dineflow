@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --watch src/server.ts",
+    "dev": "node --env-file=../../.env --watch src/server.ts",
     "start": "node src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test --test-concurrency=1 --test-timeout 60000 test/*.test.ts"

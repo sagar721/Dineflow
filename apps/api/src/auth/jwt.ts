@@ -11,6 +11,14 @@ export type VerifiedToken = {
   aal: 'aal1' | 'aal2';
   sessionId?: string;
   expiresAt: number;
+  /**
+   * How this session was authenticated ("password", "totp", "recovery", ...), from
+   * the token's `amr` claim. Used to insist that a password is only ever set from
+   * a genuine recovery link, not from an ordinary session.
+   */
+  methods: string[];
+  /** When each method was used, in seconds since the epoch, where the token says. */
+  amr: { method: string; at: number | null }[];
 };
 
 export type Verifier = (token: string) => Promise<VerifiedToken | null>;
@@ -62,5 +70,18 @@ function toVerified(payload: JWTPayload): VerifiedToken | null {
     ? (payload as { session_id: string }).session_id
     : undefined;
 
-  return { userId, aal, sessionId, expiresAt: typeof payload.exp === 'number' ? payload.exp : 0 };
+  const rawAmr = (payload as { amr?: unknown }).amr;
+  const amr = Array.isArray(rawAmr)
+    ? rawAmr.flatMap((entry) => {
+        if (typeof entry === 'string') return [{ method: entry, at: null }];
+        const method = (entry as { method?: unknown })?.method;
+        const at = (entry as { timestamp?: unknown })?.timestamp;
+        return typeof method === 'string' ? [{ method, at: typeof at === 'number' ? at : null }] : [];
+      })
+    : [];
+
+  return {
+    userId, aal, sessionId, expiresAt: typeof payload.exp === 'number' ? payload.exp : 0,
+    methods: amr.map((entry) => entry.method), amr,
+  };
 }

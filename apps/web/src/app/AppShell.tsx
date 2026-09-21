@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router';
-import { LayoutDashboard, ClipboardList, ChefHat, QrCode, BookOpen, Receipt, Users, Settings, Palette } from 'lucide-react';
+import { LayoutDashboard, ClipboardList, ChefHat, QrCode, BookOpen, Receipt, Users, Settings, Palette, ShieldCheck } from 'lucide-react';
 import { Wordmark } from '@/brand/Logo.tsx';
 import { cn } from '@/lib/cn.ts';
 
@@ -17,6 +17,7 @@ const NAV: NavItem[] = [
   { to: '/billing', label: 'Billing', icon: Receipt },
   { to: '/staff', label: 'Staff', icon: Users },
   { to: '/settings', label: 'Settings', icon: Settings },
+  { to: '/security', label: 'Account security', icon: ShieldCheck, ready: true },
   { to: '/design', label: 'Design system', icon: Palette, ready: true },
 ];
 

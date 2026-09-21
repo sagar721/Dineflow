@@ -8,6 +8,7 @@
 import pg from 'pg';
 import { SignJWT } from 'jose';
 import { randomBytes } from 'node:crypto';
+import { base32Encode, totp } from './totp.ts';
 import { buildApp } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
 import { SupabaseAuth } from '../src/auth/supabase.ts';
@@ -33,6 +34,8 @@ export type StubUser = {
   /** A verified TOTP factor makes sign-in a two-step flow. */
   factorId?: string;
   totpCode?: string;
+  /** Factors created through enrollment, verified with real TOTP codes. */
+  factors?: { id: string; secret: string; status: 'unverified' | 'verified' }[];
 };
 
 /**
@@ -52,6 +55,7 @@ export class StubProviderServer {
   down = false;
   revokedAll: string[] = [];
   revokedRefreshTokens = new Set<string>();
+  passwordChanges: string[] = [];
   resetEmails: string[] = [];
 
   addUser(user: StubUser) {
@@ -74,14 +78,8 @@ export class StubProviderServer {
     if (path === '/token' && url.searchParams.get('grant_type') === 'password') {
       const user = this.users.get(String(body.email ?? '').toLowerCase());
       if (!user || user.password !== body.password) return json(400, { error: 'invalid_grant' });
-      const session = await this.#session(user, user.factorId ? 'aal1' : 'aal1');
-      return json(200, {
-        ...session,
-        user: {
-          id: user.id,
-          factors: user.factorId ? [{ id: user.factorId, status: 'verified' }] : [],
-        },
-      });
+      const session = await this.#session(user, 'aal1');
+      return json(200, { ...session, user: { id: user.id, factors: this.#factorsOf(user) } });
     }
 
     if (path === '/token' && url.searchParams.get('grant_type') === 'refresh_token') {
@@ -93,15 +91,69 @@ export class StubProviderServer {
     }
 
     if (path.startsWith('/factors/') && path.endsWith('/challenge')) {
+      const factorId = path.split('/')[2];
+      const caller = this.#caller(init);
+      const owns = [...this.users.values()].some((u) => u.factorId === factorId)
+        || Boolean(caller?.factors?.some((f) => f.id === factorId));
+      if (!owns) return json(404, { error: 'factor_not_found' });
       return json(200, { id: 'challenge-1' });
     }
 
     if (path.startsWith('/factors/') && path.endsWith('/verify')) {
       const factorId = path.split('/')[2];
-      const user = [...this.users.values()].find((u) => u.factorId === factorId);
-      if (!user || body.code !== user.totpCode) return json(400, { error: 'invalid_code' });
-      const session = await this.#session(user, 'aal2');
-      return json(200, { ...session, user: { id: user.id, factors: [] } });
+      const caller = this.#caller(init);
+      const legacy = [...this.users.values()].find((u) => u.factorId === factorId);
+      if (legacy && (!caller || caller.id === legacy.id)) {
+        if (body.code !== legacy.totpCode) return json(400, { error: 'invalid_code' });
+        return json(200, { ...(await this.#session(legacy, 'aal2')), user: { id: legacy.id, factors: [] } });
+      }
+      // Like the real provider, a factor only verifies for the user who owns it.
+      const factor = caller?.factors?.find((f) => f.id === factorId);
+      if (!caller || !factor) return json(404, { error: 'factor_not_found' });
+      const valid = [-1, 0, 1].some((step) => totp(factor.secret, Date.now(), step) === body.code);
+      if (!valid) return json(422, { error: 'invalid_code' });
+      factor.status = 'verified';
+      return json(200, { ...(await this.#session(caller, 'aal2')), user: { id: caller.id, factors: [] } });
+    }
+
+    if (path === '/factors' && method === 'POST') {
+      const caller = this.#caller(init);
+      if (!caller) return json(401, { error: 'unauthorized' });
+      const secret = base32Encode(randomBytes(20));
+      const factor = { id: crypto.randomUUID(), secret, status: 'unverified' as const };
+      (caller.factors ??= []).push(factor);
+      const uri = `otpauth://totp/DineFlow:${caller.email}?secret=${secret}&issuer=DineFlow`;
+      return json(200, {
+        id: factor.id, type: 'totp',
+        totp: { qr_code: 'data:image/svg+xml;utf-8,<svg xmlns="http://www.w3.org/2000/svg"/>', secret, uri },
+      });
+    }
+
+    if (path.startsWith('/factors/') && method === 'DELETE') {
+      const caller = this.#caller(init);
+      const factorId = path.split('/')[2];
+      if (!caller?.factors?.some((f) => f.id === factorId)) return json(404, { error: 'factor_not_found' });
+      caller.factors = caller.factors.filter((f) => f.id !== factorId);
+      return json(200, {});
+    }
+
+    if (path === '/user' && method === 'GET') {
+      const caller = this.#caller(init);
+      if (!caller) return json(401, { error: 'unauthorized' });
+      return json(200, { id: caller.id, factors: this.#factorsOf(caller) });
+    }
+
+    if (path === '/user' && method === 'PUT') {
+      const caller = this.#caller(init);
+      if (!caller) return json(401, { error: 'unauthorized' });
+      const bearer = String((init?.headers as Record<string, string>)?.authorization ?? '').replace('Bearer ', '');
+      const aal = JSON.parse(Buffer.from(bearer.split('.')[1] ?? '', 'base64url').toString() || '{}').aal;
+      const hasFactor = Boolean(caller.factorId) || Boolean(caller.factors?.some((f) => f.status === 'verified'));
+      // Verified against the live project: Supabase answers 401 insufficient_aal.
+      if (hasFactor && aal !== 'aal2') return json(401, { error_code: 'insufficient_aal' });
+      caller.password = String(body.password);
+      this.passwordChanges.push(caller.id);
+      return json(200, { id: caller.id });
     }
 
     if (path === '/admin/users' && method === 'POST') {
@@ -137,6 +189,20 @@ export class StubProviderServer {
     return json(404, { error: 'not_found' });
   };
 
+  /** The user a bearer token belongs to, as the real provider would resolve it. */
+  #caller(init?: RequestInit): StubUser | undefined {
+    const bearer = String((init?.headers as Record<string, string>)?.authorization ?? '').replace('Bearer ', '');
+    const sub = decodeSubject(bearer);
+    return sub ? [...this.users.values()].find((u) => u.id === sub) : undefined;
+  }
+
+  #factorsOf(user: StubUser) {
+    return [
+      ...(user.factorId ? [{ id: user.factorId, factor_type: 'totp', status: 'verified' }] : []),
+      ...(user.factors ?? []).map((f) => ({ id: f.id, factor_type: 'totp', status: f.status })),
+    ];
+  }
+
   async #session(user: StubUser, aal: 'aal1' | 'aal2') {
     return {
       access_token: await signToken({ sub: user.id, aal }),
@@ -164,8 +230,14 @@ export async function signToken(claims: {
   expiresIn?: string;
   issuer?: string;
   audience?: string;
+  /** Authentication methods, e.g. ['otp'] for a session from a reset link. */
+  amr?: string[];
+  /** When those methods were used (seconds since epoch); defaults to now. */
+  amrAt?: number;
 }): Promise<string> {
-  return new SignJWT({ aal: claims.aal ?? 'aal1', session_id: 'sess-1' })
+  const at = claims.amrAt ?? Math.floor(Date.now() / 1000);
+  const amr = (claims.amr ?? ['password']).map((method) => ({ method, timestamp: at }));
+  return new SignJWT({ aal: claims.aal ?? 'aal1', session_id: 'sess-1', amr })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(claims.sub)
     .setIssuedAt()

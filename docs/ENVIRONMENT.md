@@ -61,6 +61,30 @@ Two consequences worth knowing:
 1. **A staff member cannot be deleted in Supabase while a membership row references them.** The foreign key rejects it and the admin API reports a 500. This is intended — FR-110 keeps users that appear in history, and they are deactivated rather than deleted — but any offboarding must delete in dependency order.
 2. **The Supabase Data API cannot see DineFlow tables.** Migration 001 revokes everything from `anon`, `authenticated` and `service_role`, which is the point of D-19. Use the SQL editor, not the Table Editor, for these tables.
 
+## Running the API locally
+
+```bash
+npm run dev:api   # loads the git-ignored .env, validates it, and refuses to start if anything is wrong
+npm run dev:web   # http://localhost:5180
+```
+
+If the web app says **"Can't reach the DineFlow server"**, the API is not running.
+
+The web app always runs on **5180** (`strictPort`), deliberately not Vite's default 5173. Other Vite projects on the same machine take the defaults, and Vite would otherwise move to the next free port without warning. Password-reset links (`APP_BASE_URL`) and the API's CORS allow-list (`WEB_ORIGIN`) would then point at a different app — which is exactly how a reset link once opened someone else's project. If 5180 is taken, `npm run dev:web` stops with an error instead.
+
+## Supabase Auth settings DineFlow depends on
+
+| Setting (Supabase dashboard) | Required value | Why |
+|---|---|---|
+| Authentication → Sign In / Providers → **Allow new users to sign up** | **Off** | DineFlow is invite-only (FR-002). Staff accounts are created through invitations, which use the admin API and keep working with sign-ups off. With it on, anyone can create an account in your project. It cannot reach DineFlow data, but it uses your email quota and clutters Auth. |
+| Authentication → URL Configuration → **Redirect URLs** | Include `APP_BASE_URL/reset-password` for each environment. In production, list the **exact** production URL — no wildcards. | Password-reset links redirect there. Verified: the current project refuses external domains (they fall back to the Site URL) and accepts any `localhost` port, which is fine for development only. |
+| Authentication → Multi-Factor → **TOTP** | Enabled | Required for platform admins (FR-105). |
+
+Two provider behaviours, verified live and relied on by the code:
+
+- A reset link's session is marked with authentication method **`otp`**. The API accepts it only if it is less than 15 minutes old.
+- For an account with an authenticator, Supabase **refuses to change the password without the second factor** (`insufficient_aal`). The reset page therefore asks for the code as well: inbox access alone cannot take over a protected account.
+
 ## Live verification
 
 `apps/api/test/live-supabase.mjs` runs the flows a stub cannot prove, against a real project. It creates accounts prefixed `dineflow-live-test-` and deletes them afterwards.

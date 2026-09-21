@@ -25,16 +25,24 @@ export class ApiError extends Error {
 type RequestOptions = { method?: string; body?: unknown; signal?: AbortSignal };
 
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const response = await fetch(`${BASE}/api/v1${path}`, {
-    method: options.method ?? 'GET',
-    credentials: 'include',
-    headers: {
-      'content-type': 'application/json',
-      'x-dineflow-client': 'web',
-    },
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    signal: options.signal,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${BASE}/api/v1${path}`, {
+      method: options.method ?? 'GET',
+      credentials: 'include',
+      headers: {
+        'content-type': 'application/json',
+        'x-dineflow-client': 'web',
+      },
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      signal: options.signal,
+    });
+  } catch (error) {
+    if ((error as Error).name === 'AbortError') throw error;
+    // The request never reached the server: it is down, unreachable or blocked. Say
+    // so, rather than the catch-all that makes it look like the user did something wrong.
+    throw new ApiError(0, 'NETWORK', "Can't reach the DineFlow server. Check your connection, or try again in a moment.");
+  }
 
   if (response.status === 204) return undefined as T;
 

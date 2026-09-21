@@ -51,7 +51,14 @@ export class SupabaseAuth {
 
   async #call(
     path: string,
-    init: { method: string; body?: unknown; bearer?: string; useServiceKey?: boolean },
+    init: {
+      method: string; body?: unknown; bearer?: string; useServiceKey?: boolean;
+      /**
+       * For calls on a specific factor, a 404 is a real answer — "no such factor for
+       * this user" — not a missing endpoint. Only those calls set this.
+       */
+      notFoundIsAnswer?: boolean;
+    },
   ): Promise<{ status: number; body: any }> {
     const apikey = init.useServiceKey ? this.#serviceKey : this.#anonKey;
     let response: Response;
@@ -86,7 +93,7 @@ export class SupabaseAuth {
     // unchecked that looks exactly like success to a caller that ignores the
     // status, which is how a revocation call silently did nothing until a live
     // test caught it. Fail loudly instead.
-    if (response.status === 404 || response.status === 405) {
+    if ((response.status === 404 && !init.notFoundIsAnswer) || response.status === 405) {
       throw new ProviderUnavailable(`provider has no endpoint ${init.method} ${path}`);
     }
     return { status: response.status, body };
@@ -119,8 +126,9 @@ export class SupabaseAuth {
       method: 'POST',
       bearer: ticket,
       body: { challenge_id: challengeId, code },
+      notFoundIsAnswer: true,
     });
-    if (status === 400 || status === 401 || status === 422) return { kind: 'invalid' };
+    if (status === 400 || status === 401 || status === 404 || status === 422) return { kind: 'invalid' };
     if (status !== 200) throw new ProviderUnavailable(`unexpected mfa status ${status}`);
     return { kind: 'session', session: toSession(body) };
   }
@@ -129,6 +137,7 @@ export class SupabaseAuth {
     const { status, body } = await this.#call(`/factors/${encodeURIComponent(factorId)}/challenge`, {
       method: 'POST',
       bearer: ticket,
+      notFoundIsAnswer: true,
     });
     if (status !== 200) return null;
     return { challengeId: body.id };
@@ -172,6 +181,83 @@ export class SupabaseAuth {
       useServiceKey: true,
       bearer: this.#serviceKey,
       body: { email, password, email_confirm: true },
+    });
+    if (status === 409 || status === 422) return { conflict: true };
+    if (status !== 200 && status !== 201) throw new ProviderUnavailable(`unexpected create-user status ${status}`);
+    return { userId: body.id };
+  }
+
+  // ------------------------------------------------------------------ MFA setup
+
+  /** The user's second factors. Secrets are never part of this listing. */
+  async listFactors(accessToken: string): Promise<{ id: string; type: string; status: string; createdAt: string }[]> {
+    const { status, body } = await this.#call('/user', { method: 'GET', bearer: accessToken });
+    if (status !== 200) return [];
+    return (body?.factors ?? []).map((factor: any) => ({
+      id: String(factor.id),
+      type: String(factor.factor_type ?? factor.type ?? 'totp'),
+      status: String(factor.status),
+      createdAt: String(factor.created_at ?? ''),
+    }));
+  }
+
+  /**
+   * Starts enrolling an authenticator app. The QR code and secret in the result
+   * are shown to the user once, to scan; they are never stored or logged by us.
+   */
+  async enrollTotp(accessToken: string, issuer: string): Promise<{ factorId: string; uri: string; secret: string } | null> {
+    const { status, body } = await this.#call('/factors', {
+      method: 'POST',
+      bearer: accessToken,
+      // A distinct friendly name each time: the provider refuses a duplicate name,
+      // and an abandoned earlier attempt must not block a new one.
+      body: { factor_type: 'totp', issuer, friendly_name: `Authenticator ${new Date().toISOString()}` },
+    });
+    if (status !== 200 && status !== 201) return null;
+    // Supabase also returns a QR drawing, but as raw SVG of several hundred KB.
+    // The standard otpauth:// URI carries the same information; we draw a compact
+    // QR from it instead.
+    const uri = body?.totp?.uri;
+    const secret = body?.totp?.secret;
+    if (typeof body?.id !== 'string' || typeof uri !== 'string' || !uri.startsWith('otpauth://totp/')
+        || typeof secret !== 'string') return null;
+    return { factorId: body.id, uri, secret };
+  }
+
+  /** Removes a factor. Used to clear setups that were started and never finished. */
+  async deleteFactor(accessToken: string, factorId: string): Promise<boolean> {
+    const { status } = await this.#call(`/factors/${encodeURIComponent(factorId)}`, {
+      method: 'DELETE',
+      bearer: accessToken,
+      notFoundIsAnswer: true,
+    });
+    return status === 200 || status === 204;
+  }
+
+  /**
+   * Sets a new password using the session a recovery link produced. The caller
+   * must have checked that the token really came from a recovery link.
+   */
+  async setPasswordWithRecoverySession(accessToken: string, newPassword: string): Promise<boolean> {
+    const { status } = await this.#call('/user', {
+      method: 'PUT',
+      bearer: accessToken,
+      body: { password: newPassword },
+    });
+    return status === 200;
+  }
+
+  /**
+   * Creates an account with no password and a confirmed email. The owner sets the
+   * password themselves from a recovery email, so it never passes through anyone
+   * else's hands.
+   */
+  async createUserWithoutPassword(email: string): Promise<{ userId: string } | { conflict: true }> {
+    const { status, body } = await this.#call('/admin/users', {
+      method: 'POST',
+      useServiceKey: true,
+      bearer: this.#serviceKey,
+      body: { email, email_confirm: true },
     });
     if (status === 409 || status === 422) return { conflict: true };
     if (status !== 200 && status !== 201) throw new ProviderUnavailable(`unexpected create-user status ${status}`);

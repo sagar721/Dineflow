@@ -1,11 +1,24 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { Wordmark } from '@/brand/Logo.tsx';
 import { Button, Card, CardBody, Field, Input } from '@/components/ui/index.ts';
 import { ApiError, apiFetch } from '@/lib/api.ts';
 import { useSession } from './SessionProvider.tsx';
 
 type Step = 'credentials' | 'mfa';
+
+/**
+ * Where to go after signing in. A platform administrator without two-step
+ * verification can do nothing until it is set up, so they go straight there.
+ */
+async function landingFor(): Promise<string> {
+  try {
+    const me = await apiFetch<{ kind: string; mfa: boolean }>('/auth/me');
+    return me.kind === 'platform_admin' && !me.mfa ? '/security' : '/';
+  } catch {
+    return '/';
+  }
+}
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -33,7 +46,7 @@ export function LoginPage() {
         return;
       }
       await refresh();
-      navigate('/', { replace: true });
+      navigate(await landingFor(), { replace: true });
     } catch (caught) {
       // The API deliberately returns one message for every failure, so there is
       // nothing here to expand on: guessing would leak what it withholds.
@@ -50,7 +63,7 @@ export function LoginPage() {
     try {
       await apiFetch('/auth/mfa/verify', { method: 'POST', body: { code: code.trim() } });
       await refresh();
-      navigate('/', { replace: true });
+      navigate(await landingFor(), { replace: true });
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'Something went wrong. Please try again.');
       setCode('');
@@ -154,8 +167,8 @@ export function LoginPage() {
           </CardBody>
         </Card>
 
-        <p className="mt-4 text-center text-xs text-muted">
-          Trouble signing in? Ask your restaurant owner to send a new invitation.
+        <p className="mt-4 text-center text-sm">
+          <Link to="/reset-password" className="font-medium text-brand hover:underline">Forgot your password?</Link>
         </p>
       </div>
     </main>
