@@ -78,7 +78,13 @@ failures += report(`Isolation matrix (ISO-03 … ISO-06) — ${cells} declared c
 failures += report('Request context isolation (ISO-07)', await runContextLeakChecks(api, fixtures));
 
 // 5. Canaries (ISO-09): does any of the above actually fail when it should?
-failures += report('Sabotage canaries (ISO-09)', await runCanaries(owner, api, OWNER_URL));
+//    They deliberately break protections before repairing them, which is safe on a
+//    disposable local database but not on a shared project, so they are skippable.
+if (process.env.SKIP_CANARIES === '1') {
+  process.stdout.write(section('Sabotage canaries (ISO-09)') + '\n  \x1b[33mskipped\x1b[0m (SKIP_CANARIES=1: they alter the schema to prove detection)\n');
+} else {
+  failures += report('Sabotage canaries (ISO-09)', await runCanaries(owner, api, OWNER_URL));
+}
 
 // 6. Leave the database in its verified state.
 await seed(owner);

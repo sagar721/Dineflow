@@ -39,12 +39,45 @@ The test suites need Postgres on `localhost:55432` (`npm run db:up`). They set t
 | `DATABASE_URL` | migrations, isolation harness, API tests | `postgres://postgres:dineflow_local_only@localhost:55432/dineflow` |
 | `DINEFLOW_PG_PORT`, `DINEFLOW_PG_CONTAINER`, `DINEFLOW_PG_IMAGE` | `scripts/db-docker.mjs` | `55432`, `dineflow-pg`, `postgres:17-alpine` |
 
+## Running against the Supabase database
+
+The API can point at either database. Locally it uses the disposable Postgres with a
+minimal `auth.users` stand-in; deployed, it points at the Supabase database where
+`auth.users` is the provider's own table and our foreign keys reference it directly.
+
+| | Local | Supabase |
+|---|---|---|
+| `auth.users` | stand-in created by migration 001 | the real table, owned by `supabase_auth_admin` |
+| Migration role | `postgres` (superuser) | `postgres` (not superuser, but has `BYPASSRLS`) |
+| Direct host | `localhost:55432` | `db.<ref>.supabase.co:5432`, **IPv6 only** |
+| TLS | none | required; `sslmode=no-verify` works for ad-hoc runs, production should pin Supabase's CA |
+
+Two consequences worth knowing:
+
+1. **A staff member cannot be deleted in Supabase while a membership row references them.** The foreign key rejects it and the admin API reports a 500. This is intended — FR-110 keeps users that appear in history, and they are deactivated rather than deleted — but any offboarding must delete in dependency order.
+2. **The Supabase Data API cannot see DineFlow tables.** Migration 001 revokes everything from `anon`, `authenticated` and `service_role`, which is the point of D-19. Use the SQL editor, not the Table Editor, for these tables.
+
 ## Live verification
 
 `apps/api/test/live-supabase.mjs` runs the flows a stub cannot prove, against a real project. It creates accounts prefixed `dineflow-live-test-` and deletes them afterwards.
 
 ```bash
+# Real Supabase Auth, local database
 set -a && . ./.env && set +a && node apps/api/test/live-supabase.mjs
+
+# Real Supabase Auth and the Supabase database — the deployed shape
+set -a && . ./.env && set +a && \
+  LIVE_OWNER_URL="$SUPABASE_OWNER_URL" LIVE_API_URL="$SUPABASE_API_URL" \
+  node apps/api/test/live-supabase.mjs
+```
+
+The tenant-isolation harness can also be pointed at Supabase. Skip the canaries
+there: they deliberately break protections to prove detection, which is safe on a
+disposable local database but not on a shared project.
+
+```bash
+DATABASE_URL="$SUPABASE_OWNER_URL" DINEFLOW_API_PASSWORD="…" SKIP_CANARIES=1 \
+  node packages/db/test/run.ts
 ```
 
 It is deliberately not part of `npm test`: it needs credentials and touches a real project.

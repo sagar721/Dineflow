@@ -35,9 +35,14 @@ for (const name of required) {
 }
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const OWNER_URL = process.env.LOCAL_DATABASE_URL
+// Point these at the Supabase database to exercise the real deployment shape,
+// where `auth.users` is the provider's own table and our foreign keys reference it.
+const OWNER_URL = process.env.LIVE_OWNER_URL
+  ?? process.env.LOCAL_DATABASE_URL
   ?? 'postgres://postgres:dineflow_local_only@localhost:55432/dineflow';
-const API_URL = OWNER_URL.replace('postgres://postgres:dineflow_local_only', 'postgres://dineflow_api:dineflow_api_local_only');
+const API_URL = process.env.LIVE_API_URL
+  ?? OWNER_URL.replace('postgres://postgres:dineflow_local_only', 'postgres://dineflow_api:dineflow_api_local_only');
+const REMOTE = Boolean(process.env.LIVE_OWNER_URL);
 
 const stamp = Date.now();
 const testEmail = `dineflow-live-test-${stamp}@example.com`;
@@ -114,14 +119,16 @@ try {
   await migrate(OWNER_URL);
   owner = new pg.Client({ connectionString: OWNER_URL });
   await owner.connect();
-  await owner.query(`alter role dineflow_api with password 'dineflow_api_local_only'`);
+  if (!REMOTE) await owner.query(`alter role dineflow_api with password 'dineflow_api_local_only'`);
   const fixtures = await seed(owner);
 
-  // The local database is separate from the Supabase one, so its `auth.users`
-  // shim needs the real user id to satisfy the membership foreign key. In a
-  // deployed environment the API points at the Supabase database and this row
-  // already exists — see the note in the report.
-  await owner.query('insert into auth.users (id, email) values ($1, $2)', [created.userId, testEmail]);
+  // Against the Supabase database the provider has already written this row, which
+  // is the whole point of the deployed shape; against a local database the shim
+  // needs it so the membership foreign key resolves.
+  await owner.query(
+    'insert into auth.users (id, email) values ($1, $2) on conflict (id) do nothing',
+    [created.userId, testEmail]);
+  check(`database target: ${REMOTE ? 'Supabase (real auth.users)' : 'local shim'}`, true);
   await owner.query(
     `insert into restaurant_users (restaurant_id, user_id, role, status, email, display_name)
      values ($1, $2, 'owner', 'active', $3, 'Live Test Owner')`,
@@ -192,6 +199,16 @@ try {
 } finally {
   // Always clean up, so a failed run does not leave accounts behind in the project.
   process.stdout.write('\n\x1b[1mCleanup\x1b[0m\n');
+
+  // Our membership rows reference auth.users, so they must go first: while a
+  // reference exists the provider cannot delete the account, and its admin API
+  // reports that as a 500. That ordering is also what the offboarding runbook
+  // will need (FR-110 keeps users referenced by history, so they are deactivated
+  // rather than deleted).
+  if (owner) {
+    await owner.query('delete from restaurant_users where email like $1', ['dineflow-live-test-%']).catch(() => {});
+  }
+
   for (const id of createdUserIds) {
     const response = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${id}`, {
       method: 'DELETE',
@@ -202,10 +219,7 @@ try {
     });
     check(`test user ${id.slice(0, 8)}… deleted from the project`, response.ok, `status ${response.status}`);
   }
-  if (owner) {
-    await owner.query('delete from restaurant_users where email like $1', ['dineflow-live-test-%']).catch(() => {});
-    await owner.end().catch(() => {});
-  }
+  if (owner) await owner.end().catch(() => {});
   if (db) await db.close().catch(() => {});
 }
 

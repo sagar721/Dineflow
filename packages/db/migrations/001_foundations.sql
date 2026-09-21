@@ -11,13 +11,20 @@ create extension if not exists citext;
 -- ------------------------------------------------------------------- schemas
 create schema if not exists app;
 
--- `auth.users` exists in Supabase. Locally we create a minimal stand-in with the
--- same shape so migrations, foreign keys and tests are identical in both places.
-create schema if not exists auth;
-create table if not exists auth.users (
-  id    uuid primary key default gen_random_uuid(),
-  email citext
-);
+-- `auth.users` is owned by Supabase (schema `auth`, owned by supabase_auth_admin),
+-- and the migration role has no CREATE there — even `create table if not exists`
+-- is refused before it can short-circuit. So only build the local stand-in when the
+-- real table is absent, which is exactly the local-development case.
+do $$
+begin
+  if to_regclass('auth.users') is null then
+    create schema if not exists auth;
+    create table auth.users (
+      id    uuid primary key default gen_random_uuid(),
+      email citext
+    );
+  end if;
+end$$;
 
 -- --------------------------------------------------------------------- roles
 -- dineflow_api    : the only LOGIN role the API uses. Owns nothing, has no table

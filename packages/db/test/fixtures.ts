@@ -27,12 +27,16 @@ export async function seed(admin: pg.Client): Promise<Fixtures> {
   await admin.query(`
     truncate audit_log, invitations, auth_lockouts, support_grants, restaurant_users,
              platform_admins, restaurants restart identity cascade;
-    delete from auth.users;
   `);
+  // Only ever remove the fixture accounts. A blanket delete here would wipe every
+  // real user when the harness is pointed at a live project.
+  await admin.query(`delete from auth.users where email like '%@example.test'`);
 
   const user = async (email: string) => {
+    // The id is supplied explicitly: Supabase's real `auth.users.id` has no default,
+    // because GoTrue always provides one.
     const { rows } = await admin.query<{ id: string }>(
-      'insert into auth.users (email) values ($1) returning id', [email]);
+      'insert into auth.users (id, email) values (gen_random_uuid(), $1) returning id', [email]);
     return rows[0]!.id;
   };
   const restaurant = async (slug: string, marker: string, status: string) => {
