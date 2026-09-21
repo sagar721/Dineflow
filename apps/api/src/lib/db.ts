@@ -6,7 +6,7 @@
 // SECURITY DEFINER function rather than direct table access.
 import pg from 'pg';
 import { createHash } from 'node:crypto';
-import { assertSafeDbRole, withStaffTx } from '@dineflow/db/context';
+import { assertSafeDbRole, withPublicTx, withStaffTx } from '@dineflow/db/context';
 import type { StaffRole } from '@dineflow/shared';
 
 export type Membership = {
@@ -49,6 +49,36 @@ export class Database {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Runs `body` as an anonymous customer scoped to one restaurant. The restaurant
+   * must come from a verified capability (a QR token), never from the request.
+   */
+  async asPublic<T>(restaurantId: string, body: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+    const client = await this.#pool.connect();
+    try {
+      return await withPublicTx(client, restaurantId, () => body(client));
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Resolves a QR's random id to its table, only when the token, table and
+   * restaurant are all live. Call it only after the token's MAC has verified.
+   */
+  async resolveTableQr(qrId: string): Promise<{
+    restaurantId: string; tableId: string; tableNumber: string; tableName: string | null; keyId: number;
+  } | null> {
+    const { rows } = await this.#pool.query<{
+      restaurant_id: string; table_id: string; table_number: string; table_name: string | null; key_id: number;
+    }>('select * from app.resolve_table_qr($1)', [qrId]);
+    const row = rows[0];
+    return row
+      ? { restaurantId: row.restaurant_id, tableId: row.table_id, tableNumber: row.table_number,
+          tableName: row.table_name, keyId: row.key_id }
+      : null;
   }
 
   /** The membership lookup that establishes tenant context on every request. */

@@ -18,7 +18,10 @@ No value in this file is ever logged, returned in a response, or committed. Secr
 | `SUPABASE_JWT_SECRET` | no | `super-secret` | Only for legacy HS256 projects. When absent, tokens are verified against the project's JWKS, which is the current and preferred path. **The connected project uses asymmetric ES256 with a JWKS, so leave this unset.** |
 | `COOKIE_SECURE` | no | `true` | `true` in every deployed environment; the API rejects `false` in production. `false` locally drops the `__Host-` cookie prefix, which requires HTTPS. |
 | `TRUST_PROXY_HOPS` | no | `1` | How many trusted proxies sit in front of the API. The client IP is taken from exactly that position in `X-Forwarded-For`; reading the whole chain would let a caller forge an address and evade rate limits. |
-| `APP_BASE_URL` | **yes** | `https://app.example.com` | Base for invitation and password-reset links. |
+| `APP_BASE_URL` | **yes** | `https://app.example.com` | Base for invitation and password-reset links **and every table QR code**. In production it must be a public `https` origin; the API refuses to start with `http` or `localhost`. Printed QR codes encode it permanently. |
+| `QR_SIGNING_KEYS` | **yes** | `1:<SECRET_1>` | Keys that sign table QR tokens: comma-separated `kid:secret`, each secret at least 32 random bytes as strict base64url without padding. **API service only.** The API refuses to start on a missing, empty, short, non-base64url, whitespace-containing, duplicated or non-random key; there is no fallback; errors never echo key material. One key per environment. Procedure, Render setup, rotation and compromise: [runbooks/qr-signing-key.md](runbooks/qr-signing-key.md). |
+| `QR_SIGNING_KEY_ID` | no | `2` | Which key signs new codes. Defaults to the highest key id; an empty value counts as unset. |
+| `QR_DOMAIN_FINAL` | no | `false` | Until `true`, QR cards are marked provisional and download and print are disabled, because a laminated card cannot be changed if the domain does. |
 | `LOG_LEVEL` | no | `info` | `silent` \| `fatal` \| `error` \| `warn` \| `info` \| `debug` \| `trace`. |
 
 ## Web (`apps/web`)
@@ -89,6 +92,7 @@ It is deliberately not part of `npm test`: it needs credentials and touches a re
 
 | Secret | When to rotate | How |
 |---|---|---|
+| `QR_SIGNING_KEYS` | Routinely by appending; on compromise by replacing | Appending a new `kid:secret` keeps printed cards working. Replacing the list kills every card signed with the removed key. See [runbooks/qr-signing-key.md](runbooks/qr-signing-key.md) §5–6. |
 | `SUPABASE_SERVICE_KEY` | On any suspected exposure, and when anyone with access leaves | Create a new secret key in the dashboard, update the API host's secret, redeploy, then delete the old one. Sessions are unaffected. **Creating new-format keys does not disable the legacy anon/service_role JWTs** — those must be disabled separately under Legacy API keys, or the old values keep working. |
 | `SUPABASE_JWT_SECRET` / signing keys | On suspected exposure | Rotating invalidates every issued token, so all staff are signed out. Plan it outside service hours. |
 | `DATABASE_URL` password | Quarterly, and on staff change | `ALTER ROLE dineflow_api WITH PASSWORD …`, update the secret, redeploy. |

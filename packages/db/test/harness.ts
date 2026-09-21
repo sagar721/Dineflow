@@ -98,6 +98,21 @@ function insertFor(spec: TableSpec, restaurantId: string, userId: string, acting
     case 'auth_lockouts':
       return { sql: `insert into auth_lockouts (key_hash, key_kind) values ($1, 'ip')`,
                params: [Buffer.from(`probe-${Math.random()}`)] };
+    case 'dining_tables':
+      return { sql: `insert into dining_tables (restaurant_id, table_number, capacity)
+                     values ($1, $2, 4)`,
+               params: [restaurantId, `P${Math.random().toString(36).slice(2, 9)}`] };
+    case 'table_qr_tokens':
+      // Aims at a table of that restaurant without a live QR, so the one-live-QR
+      // index is not what refuses it. Under RLS a principal who cannot see the
+      // tenant's tables gets a null table_id, which is itself a refusal.
+      return { sql: `insert into table_qr_tokens (restaurant_id, table_id, key_id, created_by)
+                     values ($1, (select t.id from dining_tables t
+                                   where t.restaurant_id = $1
+                                     and not exists (select 1 from table_qr_tokens q
+                                                      where q.table_id = t.id and q.revoked_at is null)
+                                   limit 1), 1, $2)`,
+               params: [restaurantId, actingUserId] };
     case 'restaurant_settings':
       // One row per restaurant already exists, so any insert is a duplicate; the
       // probe still proves the policy refuses before the constraint would.
@@ -127,6 +142,11 @@ function updateFor(spec: TableSpec, restaurantId: string): { sql: string; params
       return { sql: `update invitations set revoked_at = now() where restaurant_id = $1`, params: [restaurantId] };
     case 'auth_lockouts':
       return { sql: `update auth_lockouts set failures = failures + 1 where key_kind = 'ip'`, params: [] };
+    case 'dining_tables':
+      return { sql: `update dining_tables set capacity = capacity + 1 where restaurant_id = $1`, params: [restaurantId] };
+    case 'table_qr_tokens':
+      return { sql: `update table_qr_tokens set revoked_at = now() where restaurant_id = $1 and revoked_at is null`,
+               params: [restaurantId] };
     case 'restaurant_settings':
       return { sql: `update restaurant_settings set bill_footer = 'probe' where restaurant_id = $1`, params: [restaurantId] };
     case 'tax_components':

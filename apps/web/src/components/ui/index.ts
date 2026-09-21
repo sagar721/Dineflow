@@ -9,3 +9,4 @@ export { EmptyState } from './EmptyState.tsx';
 export { Skeleton } from './Skeleton.tsx';
 export { LiveIndicator, type ConnectionState } from './LiveIndicator.tsx';
 export { DemoBanner } from './DemoBanner.tsx';
+export { Dialog } from './Dialog.tsx';

@@ -7,6 +7,7 @@
 // shapes) without an account. What it cannot prove is listed in the report.
 import pg from 'pg';
 import { SignJWT } from 'jose';
+import { randomBytes } from 'node:crypto';
 import { buildApp } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
 import { SupabaseAuth } from '../src/auth/supabase.ts';
@@ -175,6 +176,16 @@ export async function signToken(claims: {
 }
 
 export const TEST_JWT_SECRET = JWT_SECRET;
+/**
+ * Test-only QR keys, generated per run so no fixed signing secret exists in the
+ * repo. Two keys: fixture QRs are recorded under key 1, new ones are signed with
+ * key 2, which lets tests prove a token only works with the key it was issued under.
+ */
+const qrSecret = () => randomBytes(32).toString('base64url');
+export const TEST_QR_KEYS = `1:${qrSecret()},2:${qrSecret()}`;
+
+/** Every log call made by the app under test, so tests can prove secrets never appear. */
+export const capturedLogs: unknown[] = [];
 export const TEST_SUPABASE_URL = SUPABASE_URL;
 
 export type TestContext = {
@@ -202,37 +213,8 @@ export async function createTestContext(options: TestOptions = {}): Promise<Test
 
   const provider = new StubProviderServer();
   provider.owner = owner;
-  const config = loadConfig({
-    NODE_ENV: 'test',
-    DATABASE_URL: API_URL,
-    WEB_ORIGIN: 'http://localhost:5173',
-    SUPABASE_URL,
-    SUPABASE_ANON_KEY: 'anon-test-key',
-    SUPABASE_SERVICE_KEY: 'service-test-key',
-    SUPABASE_JWT_SECRET: JWT_SECRET,
-    APP_BASE_URL: 'http://localhost:5173',
-    // Plain HTTP in tests, so cookies drop the __Host- prefix exactly as they do
-    // in local development.
-    COOKIE_SECURE: 'false',
-    TRUST_PROXY_HOPS: '1',
-    LOG_LEVEL: 'silent',
-  } as NodeJS.ProcessEnv);
-
   const db = new Database(API_URL);
-  const built = buildApp({
-    config,
-    db,
-    provider: new SupabaseAuth({
-      url: SUPABASE_URL,
-      anonKey: 'anon-test-key',
-      serviceKey: 'service-test-key',
-      fetchImpl: provider.fetch,
-    }),
-    verify: createVerifier({ supabaseUrl: SUPABASE_URL, jwtSecret: JWT_SECRET }),
-    limiter: new MemoryRateLimiter(),
-    logger: silentLogger(),
-    sendInvitationEmail: options.sendInvitationEmail,
-  });
+  const built = bootApp(db, provider, {}, options);
 
   return {
     app: built.app,
@@ -247,15 +229,72 @@ export async function createTestContext(options: TestOptions = {}): Promise<Test
   };
 }
 
+/** The environment every test app boots with; overrides replace single variables. */
+export function testEnv(overrides: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
+  return {
+    NODE_ENV: 'test',
+    DATABASE_URL: API_URL,
+    WEB_ORIGIN: 'http://localhost:5173',
+    SUPABASE_URL,
+    SUPABASE_ANON_KEY: 'anon-test-key',
+    SUPABASE_SERVICE_KEY: 'service-test-key',
+    SUPABASE_JWT_SECRET: JWT_SECRET,
+    APP_BASE_URL: 'http://localhost:5173',
+    // Plain HTTP in tests, so cookies drop the __Host- prefix exactly as they do
+    // in local development.
+    COOKIE_SECURE: 'false',
+    TRUST_PROXY_HOPS: '1',
+    LOG_LEVEL: 'silent',
+    QR_SIGNING_KEYS: TEST_QR_KEYS,
+    ...overrides,
+  } as NodeJS.ProcessEnv;
+}
+
+/**
+ * Boots an app instance against an existing database. Calling it again with the
+ * same environment is what a process restart looks like: nothing survives but the
+ * database and the configuration.
+ */
+export function bootApp(
+  db: Database,
+  provider: StubProviderServer,
+  overrides: Record<string, string | undefined> = {},
+  options: TestOptions = {},
+) {
+  return buildApp({
+    config: loadConfig(testEnv(overrides)),
+    db,
+    provider: new SupabaseAuth({
+      url: SUPABASE_URL,
+      anonKey: 'anon-test-key',
+      serviceKey: 'service-test-key',
+      fetchImpl: provider.fetch,
+    }),
+    verify: createVerifier({ supabaseUrl: SUPABASE_URL, jwtSecret: JWT_SECRET }),
+    limiter: new MemoryRateLimiter(),
+    logger: silentLogger(),
+    sendInvitationEmail: options.sendInvitationEmail,
+  });
+}
+
 function silentLogger() {
   const noop = () => undefined;
   // DINEFLOW_TEST_LOG=1 surfaces the error handler's internal detail when a test
   // fails with a deliberately generic 500.
   const loud = process.env.DINEFLOW_TEST_LOG === '1';
-  const report = (payload: unknown, message?: string) => {
-    if (loud) console.error('[api]', message, JSON.stringify(payload, (_k, v) => v instanceof Error ? { name: v.name, message: v.message } : v).slice(0, 400));
+  const serialise = (payload: unknown) =>
+    JSON.stringify(payload, (_k, v) => v instanceof Error ? { name: v.name, message: v.message } : v);
+  const record = (level: string) => (payload: unknown, message?: string) => {
+    capturedLogs.push({ level, payload: serialise(payload), message });
+    if (loud && (level === 'error' || level === 'fatal')) {
+      console.error('[api]', message, serialise(payload).slice(0, 400));
+    }
   };
-  return { info: noop, warn: noop, error: report, debug: noop, fatal: report, trace: noop } as never;
+  void noop;
+  return {
+    info: record('info'), warn: record('warn'), error: record('error'),
+    debug: record('debug'), fatal: record('fatal'), trace: record('trace'),
+  } as never;
 }
 
 /** Reads audit rows directly, as the owner, to assert what was recorded. */

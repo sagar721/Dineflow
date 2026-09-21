@@ -146,6 +146,7 @@ try {
     COOKIE_SECURE: 'false',
     TRUST_PROXY_HOPS: '0',
     LOG_LEVEL: 'silent',
+    QR_SIGNING_KEYS: process.env.QR_SIGNING_KEYS,
   });
 
   db = new Database(API_URL);

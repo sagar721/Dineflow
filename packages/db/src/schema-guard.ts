@@ -39,6 +39,7 @@ export const ALLOWED_DEFINER_FUNCTIONS = new Set([
   'app.create_restaurant',
   'app.list_restaurants',
   'app.set_restaurant_status',
+  'app.resolve_table_qr',
 ]);
 
 /** Roles that must never hold privileges on DineFlow tables (Part 7 §3, F-1/F-7). */

@@ -13,6 +13,9 @@ import { authRoutes } from './modules/auth/routes.ts';
 import { staffRoutes } from './modules/staff/routes.ts';
 import { platformRoutes } from './modules/platform/routes.ts';
 import { restaurantRoutes } from './modules/restaurant/routes.ts';
+import { tableRoutes } from './modules/tables/routes.ts';
+import { publicRoutes } from './modules/public/routes.ts';
+import { parseKeyring } from './lib/qr-token.ts';
 import { notFound } from './lib/errors.ts';
 
 export type AppDeps = {
@@ -43,6 +46,10 @@ export function buildApp(deps: AppDeps): BuiltApp {
     supabaseUrl: config.SUPABASE_URL,
     jwtSecret: config.SUPABASE_JWT_SECRET,
   });
+
+  // Parsed once at boot: a weak or malformed key stops the API starting, rather than
+  // surfacing on the first QR a restaurant tries to print.
+  const qrKeys = parseKeyring(config.QR_SIGNING_KEYS, config.QR_SIGNING_KEY_ID);
 
   const app = express();
   app.disable('x-powered-by');
@@ -81,6 +88,16 @@ export function buildApp(deps: AppDeps): BuiltApp {
     sendInvitationEmail: deps.sendInvitationEmail,
     revealInvitationLink: deps.revealInvitationLink ?? config.REVEAL_INVITATION_LINK,
   }));
+  // Mounted before the restaurant router, which would otherwise also match this
+  // prefix and authenticate the request a second time.
+  app.use('/api/v1/restaurant/tables', tableRoutes({
+    db, verify,
+    cookieSecure: config.COOKIE_SECURE,
+    appBaseUrl: config.APP_BASE_URL,
+    qrKeys,
+    qrDomainFinal: config.QR_DOMAIN_FINAL,
+  }));
+  app.use('/api/v1/public', publicRoutes({ db, limiter, qrKeys }));
   app.use('/api/v1/restaurant', restaurantRoutes({
     db, verify, cookieSecure: config.COOKIE_SECURE,
   }));

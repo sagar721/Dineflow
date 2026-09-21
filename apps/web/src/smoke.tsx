@@ -6,17 +6,19 @@ import { SessionProvider } from '@/features/auth/SessionProvider.tsx';
 import { LoginPage } from '@/features/auth/LoginPage.tsx';
 import { AcceptInvitePage } from '@/features/auth/AcceptInvitePage.tsx';
 import { OnboardingPage } from '@/features/onboarding/OnboardingPage.tsx';
+import { TablesPage } from '@/features/tables/TablesPage.tsx';
+import { TableEntryPage } from '@/features/public/TableEntryPage.tsx';
 import { AppShell } from '@/app/AppShell.tsx';
 import { DashboardPage } from '@/features/dashboard/DashboardPage.tsx';
 import { DesignPage } from '@/features/design/DesignPage.tsx';
 import { NotFoundPage } from '@/app/NotFoundPage.tsx';
 
-const routes = ['/', '/design', '/orders', '/login', '/accept-invite', '/setup'];
+const routes = ['/', '/design', '/orders', '/login', '/accept-invite', '/setup', '/tables', '/t/sample-token'];
 let failures = 0;
 
 for (const route of routes) {
   try {
-    const signedOut = route === '/login' || route === '/accept-invite';
+    const signedOut = route === '/login' || route === '/accept-invite' || route.startsWith('/t/');
     const html = renderToString(
       <MemoryRouter initialEntries={[route]}>
         <SessionProvider>
@@ -24,6 +26,7 @@ for (const route of routes) {
             <Routes>
               <Route path="/login" element={<LoginPage />} />
               <Route path="/accept-invite" element={<AcceptInvitePage />} />
+              <Route path="/t/:token" element={<TableEntryPage />} />
             </Routes>
           ) : (
             <AppShell>
@@ -31,6 +34,7 @@ for (const route of routes) {
                 <Route path="/" element={<DashboardPage />} />
                 <Route path="/design" element={<DesignPage />} />
                 <Route path="/setup" element={<OnboardingPage />} />
+                <Route path="/tables" element={<TablesPage />} />
                 <Route path="*" element={<NotFoundPage />} />
               </Routes>
             </AppShell>
@@ -40,7 +44,9 @@ for (const route of routes) {
     );
 
     const checks: [string, boolean][] = [
-      ['renders markup', html.length > 500],
+      // The customer's loading screen is deliberately minimal on a phone, so it gets
+      // a lower floor; every other screen must render substantial markup.
+      ['renders markup', html.length > (route.startsWith('/t/') ? 200 : 500)],
       ['has a skip link', signedOut || html.includes('Skip to main content')],
       ['has one h1', (html.match(/<h1/g) ?? []).length === 1],
       ['no unresolved React placeholders', !html.includes('[object Object]')],
@@ -61,6 +67,15 @@ for (const route of routes) {
       // rather than an empty shell or a crash.
       checks.push(['setup renders without a session', html.length > 500]);
       checks.push(['setup shows a busy state', html.includes('aria-busy')]);
+    }
+    if (route === '/tables') {
+      checks.push(['tables page has its heading while loading', html.includes('Tables &amp; QR')]);
+      checks.push(['tables page shows a busy state', html.includes('aria-busy')]);
+    }
+    if (route.startsWith('/t/')) {
+      checks.push(['customer page has a heading while loading', html.includes('Finding your table')]);
+      checks.push(['customer page shows no staff navigation', !html.includes('Skip to main content')]);
+      checks.push(['customer page does not echo the token', !html.includes('sample-token')]);
     }
     if (route === '/orders') {
       checks.push(['unbuilt route says so', html.includes('Nothing is built at /orders')]);

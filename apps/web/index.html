@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light" />
+    <!-- Customer pages carry a capability token in the path (/t/<token>). Sending no
+         Referer means it can never leak to anything the page loads or links to. -->
+    <meta name="referrer" content="no-referrer" />
     <title>DineFlow</title>
     <meta name="description" content="QR ordering and billing for restaurants and cafés." />
   </head>

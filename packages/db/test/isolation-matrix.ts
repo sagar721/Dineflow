@@ -210,6 +210,54 @@ export const TABLES: TableSpec[] = [
     },
   },
   {
+    table: 'dining_tables',
+    tenantColumn: 'restaurant_id',
+    markerColumn: "coalesce(name, '')",
+    cells: {
+      // Every staff role reads the tables (kitchen needs table numbers on orders);
+      // only owners and managers change them (PRD §8, table.write).
+      'owner-A':        { read: 'own',  insertOwn: 'allow', updateOwn: 'allow' },
+      'manager-A':      { read: 'own',  insertOwn: 'allow', updateOwn: 'allow' },
+      'kitchen-A':      { read: 'own',  insertOwn: 'deny',  updateOwn: 'deny' },
+      'billing-A':      { read: 'own',  insertOwn: 'deny',  updateOwn: 'deny' },
+      'deactivated-A':  deny('none'),
+      'owner-S':        deny('none'),
+      'owner-B':        { read: 'own',  insertOwn: 'allow', updateOwn: 'allow' },
+      'owner-P':        { read: 'own',  insertOwn: 'allow', updateOwn: 'allow' },
+      'admin-no-mfa':   deny('none'),
+      'admin':          deny('none'),
+      'admin-granted':  { read: 'own',  insertOwn: 'deny',  updateOwn: 'deny' },
+      // Customers reach one table through a verified token and the resolver,
+      // never by reading this table.
+      'public-A':       deny('none'),
+      'public-none':    deny('none'),
+      'api-no-context': deny('none'),
+    },
+  },
+  {
+    table: 'table_qr_tokens',
+    tenantColumn: 'restaurant_id',
+    markerColumn: 'qr_id::text',
+    cells: {
+      // A qr_id is half of a working capability: only the roles that print and
+      // rotate QR codes see it, and support access does not reach it.
+      'owner-A':        { read: 'own',  insertOwn: 'allow', updateOwn: 'allow' },
+      'manager-A':      { read: 'own',  insertOwn: 'allow', updateOwn: 'allow' },
+      'kitchen-A':      deny('none'),
+      'billing-A':      deny('none'),
+      'deactivated-A':  deny('none'),
+      'owner-S':        deny('none'),
+      'owner-B':        { read: 'own',  insertOwn: 'allow', updateOwn: 'allow' },
+      'owner-P':        { read: 'own',  insertOwn: 'allow', updateOwn: 'allow' },
+      'admin-no-mfa':   deny('none'),
+      'admin':          deny('none'),
+      'admin-granted':  deny('none'),
+      'public-A':       deny('none'),
+      'public-none':    deny('none'),
+      'api-no-context': deny('none'),
+    },
+  },
+  {
     table: 'invitations',
     tenantColumn: 'restaurant_id',
     markerColumn: 'email::text',

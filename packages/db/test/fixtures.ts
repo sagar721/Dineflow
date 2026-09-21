@@ -29,7 +29,8 @@ export type Fixtures = {
 export async function seed(admin: pg.Client): Promise<Fixtures> {
   await admin.query(`
     truncate audit_log, invitations, auth_lockouts, support_grants, restaurant_users,
-             tax_components, restaurant_settings, platform_admins, restaurants restart identity cascade;
+             table_qr_tokens, dining_tables, tax_components, restaurant_settings,
+             platform_admins, restaurants restart identity cascade;
   `);
   // Only ever remove the fixture accounts. A blanket delete here would wipe every
   // real user when the harness is pointed at a live project.
@@ -103,6 +104,21 @@ export async function seed(admin: pg.Client): Promise<Fixtures> {
     await admin.query(
       `insert into tax_components (restaurant_id, name, rate_bps) values ($1, $2, 500)`,
       [rid, `${marker} GST`]);
+  }
+
+  // Two tables per restaurant: one with a live QR code, one without, so probes
+  // can create a QR without colliding with the one-live-QR-per-table rule.
+  for (const [rid, owner, marker] of [[restaurantA, ownerA, MARKER.A], [restaurantB, ownerB, MARKER.B],
+                                      [restaurantS, ownerS, MARKER.S], [restaurantP, ownerP, MARKER.P]] as const) {
+    const { rows: tbl } = await admin.query<{ id: string }>(
+      `insert into dining_tables (restaurant_id, table_number, name, capacity)
+       values ($1, 'T1', $2, 4) returning id`, [rid, marker]);
+    await admin.query(
+      `insert into dining_tables (restaurant_id, table_number, name, capacity)
+       values ($1, 'T2', $2, 2)`, [rid, marker]);
+    await admin.query(
+      `insert into table_qr_tokens (restaurant_id, table_id, key_id, created_by) values ($1, $2, 1, $3)`,
+      [rid, tbl[0]!.id, owner]);
   }
 
   // A pending invitation per restaurant, so isolation probes have something to leak.

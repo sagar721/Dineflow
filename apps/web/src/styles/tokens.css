@@ -176,4 +176,21 @@
   .no-print {
     display: none !important;
   }
+
+  /* Printing a QR card prints only the card, wherever on the page it sits. */
+  body:has(.qr-print-card) * {
+    visibility: hidden;
+  }
+  .qr-print-card,
+  .qr-print-card * {
+    visibility: visible;
+  }
+  .qr-print-card {
+    position: fixed;
+    inset: 0;
+    margin: auto;
+    border: 1px solid #000;
+    width: 80mm;
+    height: fit-content;
+  }
 }

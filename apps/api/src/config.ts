@@ -4,6 +4,7 @@
 // than failing later on the first request that needs it (design/02 §11). Secrets are
 // read here and nowhere else; nothing in this file is ever logged or returned.
 import { z } from 'zod';
+import { parseKeyring } from './lib/qr-token.ts';
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -47,8 +48,44 @@ const schema = z.object({
     .default('false')
     .transform((value) => value === 'true'),
 
+  /**
+   * Keys that sign table QR tokens: comma-separated `kid:secret` pairs, each secret
+   * at least 32 random bytes in base64url. Server-only. Several may be listed so
+   * cards printed under an older key keep working after a rotation.
+   */
+  QR_SIGNING_KEYS: z.string().min(1, 'is required'),
+  /**
+   * Which key signs new tokens. Defaults to the highest key id. An empty value —
+   * easy to leave behind in a hosting dashboard — means "not set", not key id 0.
+   */
+  QR_SIGNING_KEY_ID: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.coerce.number().int().min(1).max(255).optional(),
+  ),
+  /**
+   * Printed QR codes encode APP_BASE_URL and cannot be changed once laminated. Until
+   * the domain is declared final, QR cards are marked provisional and printing is
+   * withheld in the UI (design Q-04).
+   */
+  QR_DOMAIN_FINAL: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+
   // 'silent' is included for tests, which assert on behaviour rather than logs.
   LOG_LEVEL: z.enum(['silent', 'fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+}).superRefine((config, ctx) => {
+  // The QR keys are fully validated here, with every other setting, so a weak or
+  // malformed key stops the process at boot rather than on the first QR a
+  // restaurant tries to print. There is no fallback key: without a valid one the
+  // API does not start, in any environment.
+  if (!config.QR_SIGNING_KEYS) return; // already reported as missing
+  try {
+    parseKeyring(config.QR_SIGNING_KEYS, config.QR_SIGNING_KEY_ID);
+  } catch (error) {
+    // parseKeyring's messages name key ids only, never key material.
+    ctx.addIssue({ code: 'custom', path: ['QR_SIGNING_KEYS'], message: (error as Error).message });
+  }
 });
 
 export type Config = z.infer<typeof schema>;
@@ -66,6 +103,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const config = parsed.data;
   if (config.NODE_ENV === 'production' && !config.COOKIE_SECURE) {
     throw new Error('COOKIE_SECURE must be true in production');
+  }
+  if (config.NODE_ENV === 'production') {
+    // Every QR code printed in production encodes this origin, so it must be a real,
+    // secure, public address — never a development one.
+    const origin = new URL(config.APP_BASE_URL);
+    if (origin.protocol !== 'https:' || ['localhost', '127.0.0.1', '::1'].includes(origin.hostname)) {
+      throw new Error('APP_BASE_URL must be a public https origin in production');
+    }
   }
   if (config.NODE_ENV === 'production' && config.REVEAL_INVITATION_LINK) {
     throw new Error('REVEAL_INVITATION_LINK must not be enabled in production');

@@ -124,14 +124,18 @@ Partial unique/guard trigger: at least one `active owner` must remain per restau
 
 ### 3.2 Tables and QR
 
-**`dining_tables`**
+**`dining_tables`** — as built in migration 006. It follows the Module 3 product decisions rather than the earlier sketch: a `table_number` plus an optional `name` replace `label`/`notes`, a `capacity` is added, and a `status` enum replaces `active` + `archived_at`.
 ```sql
-id, restaurant_id, label text CHECK (length 1..40), notes text, active boolean NOT NULL DEFAULT true,
-archived_at timestamptz NULL, created_at, updated_at,
+id, restaurant_id,
+table_number text CHECK (trimmed, length 1..20),   -- unique per restaurant, case-insensitive
+name text NULL CHECK (trimmed, length 1..60),
+capacity integer CHECK (1..100),
+status table_status NOT NULL DEFAULT 'active',     -- active | inactive
+created_at, updated_at, version,
 UNIQUE (id, restaurant_id),
-UNIQUE INDEX (restaurant_id, lower(label)) WHERE archived_at IS NULL
+UNIQUE INDEX (restaurant_id, lower(table_number))
 ```
-Hard delete allowed only if the table has no orders (`ON DELETE RESTRICT` from orders; the API deletes when count is zero, else archives — FR-012).
+No role holds DELETE. Hard deletion of a table with no order history (FR-012) waits for the orders module; until then tables are deactivated.
 
 **`table_qr_tokens`** — see Part 7 §5 for the token format (the row holds **no usable token**).
 ```sql
