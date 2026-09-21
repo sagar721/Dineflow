@@ -221,11 +221,32 @@ describe('sessions', () => {
     const res = await asWeb(request(ctx.app).post('/api/v1/auth/logout-all')).set('cookie', `df_at=${token}`);
     assert.equal(res.status, 200);
     assert.ok(ctx.provider.revokedAll.includes(ctx.fixtures.ownerA));
+
+    // The revocation must actually stop the refresh token working. Asserting only
+    // that the call was made is how a revocation that hit a non-existent endpoint
+    // passed its tests while doing nothing (found by the live run).
+    const refresh = await asWeb(request(ctx.app).post('/api/v1/auth/refresh'))
+      .set('cookie', `df_rt=refresh-${ctx.fixtures.ownerA}`);
+    assert.equal(refresh.status, 401, 'the refresh token must be dead after signing out everywhere');
+  });
+
+  test('a call to an endpoint the provider does not have fails loudly', async () => {
+    // Guards the class of bug above: an unexpected 404 must never be swallowed.
+    const { SupabaseAuth } = await import('../src/auth/supabase.ts');
+    const provider = new SupabaseAuth({
+      url: 'http://supabase.test',
+      anonKey: 'k',
+      serviceKey: 'k',
+      fetchImpl: async () => new Response('{}', { status: 404 }),
+    });
+    await assert.rejects(() => provider.signOutEverywhere('token'), /temporarily unavailable/);
   });
 
   test('refresh rotates the session, and an unknown refresh token clears cookies', async () => {
+    // A user of its own: the sign-out-everywhere test deliberately kills owner A's
+    // refresh token, and these two must not depend on running in a given order.
     const good = await asWeb(request(ctx.app).post('/api/v1/auth/refresh'))
-      .set('cookie', `df_rt=refresh-${ctx.fixtures.ownerA}`);
+      .set('cookie', `df_rt=refresh-${ctx.fixtures.ownerB}`);
     assert.equal(good.status, 200);
 
     const bad = await asWeb(request(ctx.app).post('/api/v1/auth/refresh')).set('cookie', 'df_rt=not-a-real-token');

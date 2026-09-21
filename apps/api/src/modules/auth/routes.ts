@@ -216,7 +216,9 @@ export function authRoutes(deps: AuthDeps): Router {
   router.post('/logout-all', authenticate({ db, verify, cookieSecure }), async (req, res, next) => {
     try {
       const principal = req.principal!;
-      await provider.signOutAllForUser(principal.userId);
+      // Uses the caller's own access token: the provider has no admin route for
+      // revoking someone else's sessions (see SupabaseAuth.signOutEverywhere).
+      await provider.signOutEverywhere(req.accessToken!);
       clearSessionCookies(res, cookieSecure);
       await audit(req, 'auth.logout_all', undefined, principal.userId);
       res.status(200).json({ status: 'ok' });
@@ -256,8 +258,9 @@ export function authRoutes(deps: AuthDeps): Router {
           await audit(req, 'auth.password.reset_failed');
           throw badRequest('RESET_INVALID', 'That reset link is no longer valid. Please request a new one.');
         }
-        // Changing a password ends every other session (design/02 §3.2).
-        await provider.signOutAllForUser(session.userId).catch(() => undefined);
+        // Changing a password ends every other session (design/02 §3.2). The
+        // recovery exchange gave us a token for this user, so we can do it.
+        await provider.signOutEverywhere(session.accessToken).catch(() => undefined);
         await audit(req, 'auth.password.reset_completed', undefined, session.userId);
         res.status(200).json({ status: 'ok' });
       } catch (error) {

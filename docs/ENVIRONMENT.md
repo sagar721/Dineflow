@@ -15,7 +15,7 @@ No value in this file is ever logged, returned in a response, or committed. Secr
 | `SUPABASE_URL` | **yes** | `https://abcd.supabase.co` | Project URL. Also the expected JWT issuer. |
 | `SUPABASE_ANON_KEY` | **yes** | `eyJ…` | Used for password grant and refresh. Never sent to the browser. |
 | `SUPABASE_SERVICE_KEY` | **yes** | `eyJ…` | Admin operations (creating a user when an invitation is accepted, revoking sessions). **Full access to the project — treat as the most sensitive value in the system.** Never in the SPA, never in logs. |
-| `SUPABASE_JWT_SECRET` | no | `super-secret` | Only for legacy HS256 projects. When absent, tokens are verified against the project's JWKS, which is the current and preferred path. |
+| `SUPABASE_JWT_SECRET` | no | `super-secret` | Only for legacy HS256 projects. When absent, tokens are verified against the project's JWKS, which is the current and preferred path. **The connected project uses asymmetric ES256 with a JWKS, so leave this unset.** |
 | `COOKIE_SECURE` | no | `true` | `true` in every deployed environment; the API rejects `false` in production. `false` locally drops the `__Host-` cookie prefix, which requires HTTPS. |
 | `TRUST_PROXY_HOPS` | no | `1` | How many trusted proxies sit in front of the API. The client IP is taken from exactly that position in `X-Forwarded-For`; reading the whole chain would let a caller forge an address and evade rate limits. |
 | `APP_BASE_URL` | **yes** | `https://app.example.com` | Base for invitation and password-reset links. |
@@ -38,6 +38,16 @@ The test suites need Postgres on `localhost:55432` (`npm run db:up`). They set t
 |---|---|---|
 | `DATABASE_URL` | migrations, isolation harness, API tests | `postgres://postgres:dineflow_local_only@localhost:55432/dineflow` |
 | `DINEFLOW_PG_PORT`, `DINEFLOW_PG_CONTAINER`, `DINEFLOW_PG_IMAGE` | `scripts/db-docker.mjs` | `55432`, `dineflow-pg`, `postgres:17-alpine` |
+
+## Live verification
+
+`apps/api/test/live-supabase.mjs` runs the flows a stub cannot prove, against a real project. It creates accounts prefixed `dineflow-live-test-` and deletes them afterwards.
+
+```bash
+set -a && . ./.env && set +a && node apps/api/test/live-supabase.mjs
+```
+
+It is deliberately not part of `npm test`: it needs credentials and touches a real project.
 
 ## Rotation
 

@@ -50,6 +50,7 @@ export class StubProviderServer {
   /** Set to simulate the provider being unreachable. */
   down = false;
   revokedAll: string[] = [];
+  revokedRefreshTokens = new Set<string>();
   resetEmails: string[] = [];
 
   addUser(user: StubUser) {
@@ -83,6 +84,7 @@ export class StubProviderServer {
     }
 
     if (path === '/token' && url.searchParams.get('grant_type') === 'refresh_token') {
+      if (this.revokedRefreshTokens.has(String(body.refresh_token))) return json(400, { error: 'invalid_grant' });
       const user = [...this.users.values()].find((u) => `refresh-${u.id}` === body.refresh_token);
       if (!user) return json(400, { error: 'invalid_grant' });
       const session = await this.#session(user, 'aal1');
@@ -110,17 +112,26 @@ export class StubProviderServer {
       return json(200, { id, email });
     }
 
-    if (path.startsWith('/admin/users/') && path.endsWith('/sessions')) {
-      this.revokedAll.push(path.split('/')[3] ?? '');
-      return json(200, {});
-    }
+
 
     if (path === '/recover') {
       this.resetEmails.push(String(body.email ?? ''));
       return json(200, {});
     }
 
-    if (path === '/logout') return json(204, {});
+    if (path === '/logout') {
+      // The live project rejects the refresh token afterwards; record who was
+      // revoked so tests can assert it, and drop their refresh token.
+      if (url.searchParams.get('scope') === 'global') {
+        const bearer = String((init?.headers as Record<string, string>)?.authorization ?? '').replace('Bearer ', '');
+        const sub = decodeSubject(bearer);
+        if (sub) {
+          this.revokedAll.push(sub);
+          this.revokedRefreshTokens.add(`refresh-${sub}`);
+        }
+      }
+      return new Response(null, { status: 204 });
+    }
 
     return json(404, { error: 'not_found' });
   };
@@ -131,6 +142,17 @@ export class StubProviderServer {
       refresh_token: `refresh-${user.id}`,
       expires_in: 900,
     };
+  }
+}
+
+/** Reads the subject out of a token without verifying it — stub-side only. */
+function decodeSubject(token: string): string | null {
+  try {
+    const part = token.split('.')[1];
+    if (!part) return null;
+    return JSON.parse(Buffer.from(part, 'base64url').toString()).sub ?? null;
+  } catch {
+    return null;
   }
 }
 

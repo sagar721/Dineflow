@@ -82,6 +82,13 @@ export class SupabaseAuth {
       }
     }
     if (response.status >= 500) throw new ProviderUnavailable(`provider returned ${response.status}`);
+    // A 404 or 405 means we called an endpoint the provider does not have. Left
+    // unchecked that looks exactly like success to a caller that ignores the
+    // status, which is how a revocation call silently did nothing until a live
+    // test caught it. Fail loudly instead.
+    if (response.status === 404 || response.status === 405) {
+      throw new ProviderUnavailable(`provider has no endpoint ${init.method} ${path}`);
+    }
     return { status: response.status, body };
   }
 
@@ -141,13 +148,17 @@ export class SupabaseAuth {
     await this.#call(`/logout?scope=${scope}`, { method: 'POST', bearer: accessToken });
   }
 
-  /** Revokes every session for a user — used when a staff member is deactivated. */
-  async signOutAllForUser(userId: string): Promise<void> {
-    await this.#call(`/admin/users/${encodeURIComponent(userId)}/sessions`, {
-      method: 'DELETE',
-      useServiceKey: true,
-      bearer: this.#serviceKey,
-    });
+  /**
+   * Revokes every session belonging to the holder of this access token.
+   *
+   * GoTrue has no admin endpoint for revoking another user's sessions — verified
+   * against a live project, where `DELETE /admin/users/{id}/sessions` returns 404 —
+   * so this needs the user's own token. Locking out *another* user (deactivation)
+   * is handled by the membership check that runs on every request, which denies
+   * them at our API even though their token is still valid.
+   */
+  async signOutEverywhere(accessToken: string): Promise<void> {
+    await this.#call('/logout?scope=global', { method: 'POST', bearer: accessToken });
   }
 
   /**
