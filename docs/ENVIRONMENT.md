@@ -49,7 +49,8 @@ minimal `auth.users` stand-in; deployed, it points at the Supabase database wher
 |---|---|---|
 | `auth.users` | stand-in created by migration 001 | the real table, owned by `supabase_auth_admin` |
 | Migration role | `postgres` (superuser) | `postgres` (not superuser, but has `BYPASSRLS`) |
-| Direct host | `localhost:55432` | `db.<ref>.supabase.co:5432`, **IPv6 only** — a network without IPv6 routing cannot reach it at all, and the connection-pooler endpoint (IPv4) must be enabled in the project for such networks |
+| Direct host | `localhost:55432` | `db.<ref>.supabase.co:5432`, **IPv6 only** — unreachable from networks without IPv6 routing |
+| IPv4 route | — | Session pooler: `aws-0-<region>.pooler.supabase.com:5432`, username `<role>.<project-ref>`. Copy the exact string from the dashboard's **Connect → Session pooler**; the region is not guessable (this project is `ap-northeast-2`, Seoul) |
 | TLS | none | required; `sslmode=no-verify` works for ad-hoc runs, production should pin Supabase's CA |
 
 Two consequences worth knowing:
@@ -73,10 +74,12 @@ set -a && . ./.env && set +a && \
 
 The tenant-isolation harness can also be pointed at Supabase. Skip the canaries
 there: they deliberately break protections to prove detection, which is safe on a
-disposable local database but not on a shared project.
+disposable local database but not on a shared project. Pass the API role's full
+connection string: when `DINEFLOW_API_URL` is set, the harness uses it as-is and
+never touches that role's password.
 
 ```bash
-DATABASE_URL="$SUPABASE_OWNER_URL" DINEFLOW_API_PASSWORD="…" SKIP_CANARIES=1 \
+DATABASE_URL="$SUPABASE_OWNER_URL" DINEFLOW_API_URL="$SUPABASE_API_URL" SKIP_CANARIES=1 \
   node packages/db/test/run.ts
 ```
 

@@ -15,8 +15,11 @@ import { runCanaries } from './canaries.ts';
 const OWNER_URL = process.env.DATABASE_URL ?? 'postgres://postgres:dineflow_local_only@localhost:55432/dineflow';
 const API_PASSWORD = process.env.DINEFLOW_API_PASSWORD ?? 'dineflow_api_local_only';
 const API_URL = new URL(OWNER_URL.replace(/^postgres(ql)?:\/\//, 'http://'));
-const apiConnectionString =
-  `postgres://dineflow_api:${API_PASSWORD}@${API_URL.hostname}:${API_URL.port || 5432}${API_URL.pathname}`;
+// A remote target supplies its own API connection string: poolers name the role
+// differently (`dineflow_api.<project>`), and its password is a real secret.
+const REMOTE_API_URL = process.env.DINEFLOW_API_URL;
+const apiConnectionString = REMOTE_API_URL
+  ?? `postgres://dineflow_api:${API_PASSWORD}@${API_URL.hostname}:${API_URL.port || 5432}${API_URL.pathname}`;
 
 const section = (title: string) => `\n\x1b[1m${title}\x1b[0m`;
 
@@ -39,7 +42,11 @@ await owner.connect();
 await migrate(OWNER_URL);
 // The API's login role needs a password to connect; in production this is a deploy
 // secret, here a local-only value.
-await owner.query(`alter role dineflow_api with password '${API_PASSWORD}'`);
+// Only a local target gets the API role's password set here. Doing it against a
+// real project would replace its secret with a value published in this repository.
+if (!REMOTE_API_URL) {
+  await owner.query(`alter role dineflow_api with password '${API_PASSWORD}'`);
+}
 
 const api = new pg.Client({ connectionString: apiConnectionString });
 await api.connect();
