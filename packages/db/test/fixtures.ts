@@ -10,12 +10,15 @@ export const MARKER = {
   A: 'MARKER-TENANT-A',
   B: 'MARKER-TENANT-B',
   S: 'MARKER-TENANT-SUSPENDED',
+  P: 'MARKER-TENANT-PROVISIONING',
 } as const;
 
 export type Fixtures = {
   restaurantA: string; restaurantB: string; restaurantS: string;
+  /** Still being set up: its owner must be able to work, its customers must not. */
+  restaurantP: string;
   ownerA: string; managerA: string; kitchenA: string; billingA: string;
-  deactivatedA: string; ownerB: string; ownerS: string;
+  deactivatedA: string; ownerB: string; ownerS: string; ownerP: string;
   adminPlain: string; adminGranted: string;
   /** An auth user with no membership anywhere, so insert probes do not collide. */
   spareUser: string;
@@ -26,7 +29,7 @@ export type Fixtures = {
 export async function seed(admin: pg.Client): Promise<Fixtures> {
   await admin.query(`
     truncate audit_log, invitations, auth_lockouts, support_grants, restaurant_users,
-             platform_admins, restaurants restart identity cascade;
+             tax_components, restaurant_settings, platform_admins, restaurants restart identity cascade;
   `);
   // Only ever remove the fixture accounts. A blanket delete here would wipe every
   // real user when the harness is pointed at a live project.
@@ -56,6 +59,7 @@ export async function seed(admin: pg.Client): Promise<Fixtures> {
   const restaurantA = await restaurant('tenant-a', MARKER.A, 'active');
   const restaurantB = await restaurant('tenant-b', MARKER.B, 'active');
   const restaurantS = await restaurant('tenant-s', MARKER.S, 'suspended');
+  const restaurantP = await restaurant('tenant-p', MARKER.P, 'provisioning');
 
   const ownerA = await user('owner-a@example.test');
   const managerA = await user('manager-a@example.test');
@@ -64,6 +68,7 @@ export async function seed(admin: pg.Client): Promise<Fixtures> {
   const deactivatedA = await user('gone-a@example.test');
   const ownerB = await user('owner-b@example.test');
   const ownerS = await user('owner-s@example.test');
+  const ownerP = await user('owner-p@example.test');
   const adminPlain = await user('admin@example.test');
   const adminGranted = await user('admin-grant@example.test');
   const spareUser = await user('spare@example.test');
@@ -75,6 +80,7 @@ export async function seed(admin: pg.Client): Promise<Fixtures> {
   await staff(restaurantA, deactivatedA, 'manager', 'gone-a@example.test', MARKER.A, 'deactivated');
   await staff(restaurantB, ownerB, 'owner', 'owner-b@example.test', MARKER.B);
   await staff(restaurantS, ownerS, 'owner', 'owner-s@example.test', MARKER.S);
+  await staff(restaurantP, ownerP, 'owner', 'owner-p@example.test', MARKER.P);
 
   await admin.query('insert into platform_admins (user_id) values ($1), ($2)', [adminPlain, adminGranted]);
 
@@ -89,9 +95,20 @@ export async function seed(admin: pg.Client): Promise<Fixtures> {
      values ($1, $2, $3, now() - interval '5 hours', now() - interval '1 hour')`,
     [restaurantB, adminPlain, `${MARKER.B} expired support access`]);
 
+  // Settings rows are created by a trigger; give each a marker and a tax line so
+  // isolation probes have something that could leak.
+  for (const [rid, marker] of [[restaurantA, MARKER.A], [restaurantB, MARKER.B],
+                               [restaurantS, MARKER.S], [restaurantP, MARKER.P]] as const) {
+    await admin.query(`update restaurant_settings set bill_footer = $2 where restaurant_id = $1`, [rid, marker]);
+    await admin.query(
+      `insert into tax_components (restaurant_id, name, rate_bps) values ($1, $2, 500)`,
+      [rid, `${marker} GST`]);
+  }
+
   // A pending invitation per restaurant, so isolation probes have something to leak.
   for (const [rid, inviter, marker] of [
-    [restaurantA, ownerA, 'a'], [restaurantB, ownerB, 'b'], [restaurantS, ownerS, 's'],
+    [restaurantA, ownerA, 'a'], [restaurantB, ownerB, 'b'],
+    [restaurantS, ownerS, 's'], [restaurantP, ownerP, 'p'],
   ] as const) {
     await admin.query(
       `insert into invitations (restaurant_id, email, role, token_hash, invited_by, expires_at)
@@ -99,7 +116,8 @@ export async function seed(admin: pg.Client): Promise<Fixtures> {
       [rid, `invited-${marker}@example.test`, createHash('sha256').update(`fixture-token-${marker}`).digest(), inviter]);
   }
 
-  for (const [rid, marker] of [[restaurantA, MARKER.A], [restaurantB, MARKER.B], [restaurantS, MARKER.S]] as const) {
+  for (const [rid, marker] of [[restaurantA, MARKER.A], [restaurantB, MARKER.B],
+                               [restaurantS, MARKER.S], [restaurantP, MARKER.P]] as const) {
     await admin.query(
       `insert into audit_log (restaurant_id, action, entity_type, entity_id, summary)
        values ($1::uuid, 'fixture.seeded', 'restaurant', $2::text, jsonb_build_object('marker', $3::text))`,
@@ -110,8 +128,8 @@ export async function seed(admin: pg.Client): Promise<Fixtures> {
      values (null, 'platform.fixture', 'platform', jsonb_build_object('marker', 'MARKER-PLATFORM'))`);
 
   return {
-    restaurantA, restaurantB, restaurantS,
-    ownerA, managerA, kitchenA, billingA, deactivatedA, ownerB, ownerS,
+    restaurantA, restaurantB, restaurantS, restaurantP,
+    ownerA, managerA, kitchenA, billingA, deactivatedA, ownerB, ownerS, ownerP,
     adminPlain, adminGranted, spareUser, grantIdA: grant[0]!.id,
   };
 }

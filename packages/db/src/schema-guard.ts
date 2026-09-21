@@ -32,6 +32,13 @@ export const ALLOWED_DEFINER_FUNCTIONS = new Set([
   'app.check_auth_lock',
   'app.clear_auth_failures',
   'app.record_auth_event',
+  'app.create_default_settings',
+  'app.limit_tax_components',
+  'app.restaurants_guard',
+  'app.settings_guard',
+  'app.create_restaurant',
+  'app.list_restaurants',
+  'app.set_restaurant_status',
 ]);
 
 /** Roles that must never hold privileges on DineFlow tables (Part 7 §3, F-1/F-7). */

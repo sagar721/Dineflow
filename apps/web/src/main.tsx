@@ -9,6 +9,7 @@ import { LoginPage } from '@/features/auth/LoginPage.tsx';
 import { AcceptInvitePage } from '@/features/auth/AcceptInvitePage.tsx';
 import { RequireAuth } from '@/features/auth/RequireAuth.tsx';
 import { SessionProvider } from '@/features/auth/SessionProvider.tsx';
+import { OnboardingPage } from '@/features/onboarding/OnboardingPage.tsx';
 import '@/styles/tokens.css';
 
 const root = document.getElementById('root');
@@ -30,6 +31,14 @@ createRoot(root).render(
               <AppShell>
                 <Routes>
                   <Route path="/" element={<RequireAuth><DashboardPage /></RequireAuth>} />
+                  <Route
+                    path="/setup"
+                    element={
+                      <RequireAuth permission="restaurant.settings.update">
+                        <OnboardingPage />
+                      </RequireAuth>
+                    }
+                  />
                   <Route path="/design" element={<DesignPage />} />
                   <Route path="*" element={<NotFoundPage />} />
                 </Routes>

@@ -11,6 +11,8 @@ import { cors, csrfGuard, errorHandler, securityHeaders } from './middleware/sec
 import { requestContext } from './middleware/context.ts';
 import { authRoutes } from './modules/auth/routes.ts';
 import { staffRoutes } from './modules/staff/routes.ts';
+import { platformRoutes } from './modules/platform/routes.ts';
+import { restaurantRoutes } from './modules/restaurant/routes.ts';
 import { notFound } from './lib/errors.ts';
 
 export type AppDeps = {
@@ -21,6 +23,8 @@ export type AppDeps = {
   limiter?: RateLimiter;
   logger?: Logger;
   sendInvitationEmail?: (to: string, link: string) => Promise<void>;
+  /** See PlatformDeps: only for operators with no email provider yet. */
+  revealInvitationLink?: boolean;
 };
 
 export type BuiltApp = { app: Express; db: Database; logger: Logger };
@@ -68,6 +72,17 @@ export function buildApp(deps: AppDeps): BuiltApp {
     db, provider, verify, limiter,
     cookieSecure: config.COOKIE_SECURE,
     appBaseUrl: config.APP_BASE_URL,
+  }));
+  app.use('/api/v1/platform', platformRoutes({
+    db, verify,
+    cookieSecure: config.COOKIE_SECURE,
+    appBaseUrl: config.APP_BASE_URL,
+    logger,
+    sendInvitationEmail: deps.sendInvitationEmail,
+    revealInvitationLink: deps.revealInvitationLink ?? config.REVEAL_INVITATION_LINK,
+  }));
+  app.use('/api/v1/restaurant', restaurantRoutes({
+    db, verify, cookieSecure: config.COOKIE_SECURE,
   }));
   app.use('/api/v1/staff', staffRoutes({
     db, verify,

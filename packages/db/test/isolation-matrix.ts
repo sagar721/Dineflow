@@ -42,6 +42,9 @@ export const PRINCIPALS: Principal[] = [
   { id: 'deactivated-A',  description: 'deactivated staff of restaurant A',        tenantOf: null,          how: { kind: 'staff', userOf: 'deactivatedA' } },
   { id: 'owner-S',        description: 'owner of a suspended restaurant',          tenantOf: null,          how: { kind: 'staff', userOf: 'ownerS' } },
   { id: 'owner-B',        description: 'owner of restaurant B (the other tenant)', tenantOf: 'restaurantB', how: { kind: 'staff', userOf: 'ownerB' } },
+  // An owner setting up a new restaurant must be able to work before it goes live,
+  // or onboarding cannot be completed (migration 005).
+  { id: 'owner-P',        description: 'owner of a restaurant still being provisioned', tenantOf: 'restaurantP', how: { kind: 'staff', userOf: 'ownerP' } },
   { id: 'admin-no-mfa',   description: 'platform admin without MFA',               tenantOf: null,          how: { kind: 'staff', userOf: 'adminPlain', aal: 'aal1' } },
   { id: 'admin',          description: 'platform admin (aal2), no support grant',  tenantOf: null,          how: { kind: 'staff', userOf: 'adminPlain', aal: 'aal2' } },
   { id: 'admin-granted',  description: 'platform admin (aal2) with a live grant for A', tenantOf: 'restaurantA', how: { kind: 'staff', userOf: 'adminGranted', aal: 'aal2' } },
@@ -56,6 +59,12 @@ export type TableSpec = {
   tenantColumn: string;
   /** Column carrying the fixture marker string. */
   markerColumn: string;
+  /**
+   * Marker column for public (customer) principals, when the staff one is not in
+   * the column-level grant. Reading a column the public may not see would fail for
+   * the wrong reason and hide whether row scoping actually works.
+   */
+  publicMarkerColumn?: string;
   /** Columns a public (customer) principal is allowed to read, if any. */
   publicReadable?: boolean;
   cells: Record<string, Cell>;
@@ -77,6 +86,7 @@ export const TABLES: TableSpec[] = [
       'deactivated-A':  deny('none'),
       'owner-S':        deny('none'),   // suspension locks staff out everywhere
       'owner-B':        { read: 'own',  insertOwn: 'deny',  updateOwn: 'allow' },
+      'owner-P':        { read: 'own',  insertOwn: 'deny',  updateOwn: 'allow' },
       'admin-no-mfa':   deny('none'),   // platform powers require a second factor
       'admin':          { read: 'all',  insertOwn: 'allow', updateOwn: 'allow' },
       'admin-granted':  { read: 'all',  insertOwn: 'allow', updateOwn: 'allow' },
@@ -97,6 +107,7 @@ export const TABLES: TableSpec[] = [
       'deactivated-A':  deny('none'),
       'owner-S':        deny('none'),
       'owner-B':        { read: 'own',  insertOwn: 'allow', updateOwn: 'allow' },
+      'owner-P':        { read: 'own',  insertOwn: 'allow', updateOwn: 'allow' },
       'admin-no-mfa':   deny('none'),
       'admin':          deny('none'),   // platform admins get no tenant staff data by default
       'admin-granted':  { read: 'own',  insertOwn: 'deny',  updateOwn: 'deny' },  // read-only support access
@@ -117,6 +128,7 @@ export const TABLES: TableSpec[] = [
       'deactivated-A':  deny('none'),
       'owner-S':        deny('none'),
       'owner-B':        { read: 'own',  insertOwn: 'deny',  updateOwn: 'deny' },
+      'owner-P':        { read: 'none', insertOwn: 'deny',  updateOwn: 'deny' },
       'admin-no-mfa':   deny('none'),
       'admin':          { read: 'all',  insertOwn: 'allow', updateOwn: 'allow' },
       'admin-granted':  { read: 'all',  insertOwn: 'allow', updateOwn: 'allow' },
@@ -138,12 +150,61 @@ export const TABLES: TableSpec[] = [
       'deactivated-A':  deny('none'),
       'owner-S':        deny('none'),
       'owner-B':        { read: 'own',      insertOwn: 'allow', updateOwn: 'deny' },
+      'owner-P':        { read: 'own',  insertOwn: 'allow', updateOwn: 'deny' },
       'admin-no-mfa':   deny('none'),
       // Platform admins write audit rows for their own actions on a tenant
       // (suspend, support grant); they still cannot read a tenant's audit history.
       'admin':          { read: 'platform', insertOwn: 'allow', updateOwn: 'deny' },
       'admin-granted':  { read: 'platform', insertOwn: 'allow', updateOwn: 'deny' },
       'public-A':       { read: 'none',     insertOwn: 'allow', updateOwn: 'deny' },
+      'public-none':    deny('none'),
+      'api-no-context': deny('none'),
+    },
+  },
+  {
+    table: 'restaurant_settings',
+    tenantColumn: 'restaurant_id',
+    markerColumn: 'coalesce(bill_footer, \'\')',
+    // The bill footer is staff-only; a customer sees just the ordering rules.
+    publicMarkerColumn: 'contact_policy::text',
+    cells: {
+      // Settings shape money and tax, so only the owner may change them; everyone
+      // on the team can read them because order limits and the bill header affect
+      // their work.
+      'owner-A':        { read: 'own',  insertOwn: 'deny', updateOwn: 'allow' },
+      'manager-A':      { read: 'own',  insertOwn: 'deny', updateOwn: 'deny' },
+      'kitchen-A':      { read: 'own',  insertOwn: 'deny', updateOwn: 'deny' },
+      'billing-A':      { read: 'own',  insertOwn: 'deny', updateOwn: 'deny' },
+      'deactivated-A':  deny('none'),
+      'owner-S':        deny('none'),
+      'owner-B':        { read: 'own',  insertOwn: 'deny', updateOwn: 'allow' },
+      'owner-P':        { read: 'own',  insertOwn: 'deny', updateOwn: 'allow' },
+      'admin-no-mfa':   deny('none'),
+      'admin':          deny('none'),
+      'admin-granted':  { read: 'own',  insertOwn: 'deny', updateOwn: 'deny' },
+      'public-A':       { read: 'own',  insertOwn: 'deny', updateOwn: 'deny' },
+      'public-none':    deny('none'),
+      'api-no-context': deny('none'),
+    },
+  },
+  {
+    table: 'tax_components',
+    tenantColumn: 'restaurant_id',
+    markerColumn: 'name',
+    cells: {
+      'owner-A':        { read: 'own',  insertOwn: 'allow', updateOwn: 'allow' },
+      'manager-A':      { read: 'own',  insertOwn: 'deny',  updateOwn: 'deny' },
+      'kitchen-A':      { read: 'own',  insertOwn: 'deny',  updateOwn: 'deny' },
+      'billing-A':      { read: 'own',  insertOwn: 'deny',  updateOwn: 'deny' },
+      'deactivated-A':  deny('none'),
+      'owner-S':        deny('none'),
+      'owner-B':        { read: 'own',  insertOwn: 'allow', updateOwn: 'allow' },
+      'owner-P':        { read: 'own',  insertOwn: 'allow', updateOwn: 'allow' },
+      'admin-no-mfa':   deny('none'),
+      'admin':          deny('none'),
+      'admin-granted':  { read: 'own',  insertOwn: 'deny',  updateOwn: 'deny' },
+      // The customer needs the tax lines to see an estimated total (D-17).
+      'public-A':       { read: 'own',  insertOwn: 'deny',  updateOwn: 'deny' },
       'public-none':    deny('none'),
       'api-no-context': deny('none'),
     },
@@ -162,6 +223,7 @@ export const TABLES: TableSpec[] = [
       'deactivated-A':  deny('none'),
       'owner-S':        deny('none'),
       'owner-B':        { read: 'own',  insertOwn: 'allow', updateOwn: 'allow' },
+      'owner-P':        { read: 'own',  insertOwn: 'allow', updateOwn: 'allow' },
       'admin-no-mfa':   deny('none'),
       'admin':          deny('none'),   // platform admins do not read tenant staff data
       'admin-granted':  deny('none'),   // support access is read-only and excludes invitations
@@ -184,6 +246,7 @@ export const TABLES: TableSpec[] = [
       'deactivated-A':  deny('none'),
       'owner-S':        deny('none'),
       'owner-B':        deny('none'),
+      'owner-P':        deny('none'),
       'admin-no-mfa':   deny('none'),
       'admin':          deny('none'),
       'admin-granted':  deny('none'),
@@ -204,6 +267,7 @@ export const TABLES: TableSpec[] = [
       'deactivated-A':  deny('none'),
       'owner-S':        deny('none'),
       'owner-B':        deny('none'),
+      'owner-P':        deny('none'),
       'admin-no-mfa':   deny('self'),
       'admin':          deny('self'),
       'admin-granted':  deny('self'),

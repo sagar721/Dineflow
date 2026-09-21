@@ -82,7 +82,12 @@ export function authenticate({ db, verify, cookieSecure }: AuthDeps) {
       // Each of these is a deliberate, separate denial; none of them leaks which
       // one applied, because the message is the same.
       if (membership.staffStatus !== 'active') return next(unauthorized());
-      if (membership.restaurantStatus !== 'active') return next(unauthorized());
+      // A restaurant being set up is a working restaurant for its staff: the owner
+      // signs in while it is still 'provisioning' in order to complete onboarding.
+      // Suspended and closed lock everyone out, which is what they are for.
+      if (membership.restaurantStatus !== 'active' && membership.restaurantStatus !== 'provisioning') {
+        return next(unauthorized());
+      }
       if (!membership.restaurantId || !membership.role) return next(unauthorized());
 
       req.accessToken = token;

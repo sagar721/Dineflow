@@ -106,6 +106,41 @@ export class Database {
     return rows[0]?.accept_invitation ?? null;
   }
 
+  // --------------------------------------------------------------- platform
+  // These call SECURITY DEFINER functions that check the caller's platform rights
+  // themselves, because provisioning happens before any tenant context exists.
+
+  async createRestaurant(input: {
+    adminUserId: string; slug: string; name: string; ownerEmail: string;
+    tokenHash: Buffer; expiresAt: Date; currency: string; timezone: string;
+  }): Promise<{ restaurantId: string; invitationId: string }> {
+    const { rows } = await this.#pool.query<{ restaurant_id: string; invitation_id: string }>(
+      'select * from app.create_restaurant($1, $2, $3, $4, $5, $6, $7, $8)',
+      [input.adminUserId, input.slug, input.name, input.ownerEmail,
+       input.tokenHash, input.expiresAt, input.currency, input.timezone]);
+    const row = rows[0];
+    if (!row) throw new Error('create_restaurant returned no row');
+    return { restaurantId: row.restaurant_id, invitationId: row.invitation_id };
+  }
+
+  async listRestaurants(adminUserId: string): Promise<Record<string, unknown>[]> {
+    const { rows } = await this.#pool.query('select * from app.list_restaurants($1)', [adminUserId]);
+    return rows;
+  }
+
+  /** Returns the previous status, or null when the restaurant does not exist. */
+  async setRestaurantStatus(
+    adminUserId: string, restaurantId: string, status: string, reason: string,
+  ): Promise<string | null> {
+    // No explicit ::restaurant_status cast: the API's login role has no USAGE on
+    // schema public, by design, so it cannot name types declared there. Postgres
+    // coerces the argument to the function's declared parameter type instead.
+    const { rows } = await this.#pool.query<{ set_restaurant_status: string | null }>(
+      'select app.set_restaurant_status($1, $2, $3, $4)',
+      [adminUserId, restaurantId, status, reason]);
+    return rows[0]?.set_restaurant_status ?? null;
+  }
+
   // ------------------------------------------------------------------ audit
 
   /**

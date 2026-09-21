@@ -249,7 +249,13 @@ export async function createTestContext(options: TestOptions = {}): Promise<Test
 
 function silentLogger() {
   const noop = () => undefined;
-  return { info: noop, warn: noop, error: noop, debug: noop, fatal: noop, trace: noop } as never;
+  // DINEFLOW_TEST_LOG=1 surfaces the error handler's internal detail when a test
+  // fails with a deliberately generic 500.
+  const loud = process.env.DINEFLOW_TEST_LOG === '1';
+  const report = (payload: unknown, message?: string) => {
+    if (loud) console.error('[api]', message, JSON.stringify(payload, (_k, v) => v instanceof Error ? { name: v.name, message: v.message } : v).slice(0, 400));
+  };
+  return { info: noop, warn: noop, error: report, debug: noop, fatal: report, trace: noop } as never;
 }
 
 /** Reads audit rows directly, as the owner, to assert what was recorded. */

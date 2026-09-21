@@ -5,12 +5,13 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import { SessionProvider } from '@/features/auth/SessionProvider.tsx';
 import { LoginPage } from '@/features/auth/LoginPage.tsx';
 import { AcceptInvitePage } from '@/features/auth/AcceptInvitePage.tsx';
+import { OnboardingPage } from '@/features/onboarding/OnboardingPage.tsx';
 import { AppShell } from '@/app/AppShell.tsx';
 import { DashboardPage } from '@/features/dashboard/DashboardPage.tsx';
 import { DesignPage } from '@/features/design/DesignPage.tsx';
 import { NotFoundPage } from '@/app/NotFoundPage.tsx';
 
-const routes = ['/', '/design', '/orders', '/login', '/accept-invite'];
+const routes = ['/', '/design', '/orders', '/login', '/accept-invite', '/setup'];
 let failures = 0;
 
 for (const route of routes) {
@@ -29,6 +30,7 @@ for (const route of routes) {
               <Routes>
                 <Route path="/" element={<DashboardPage />} />
                 <Route path="/design" element={<DesignPage />} />
+                <Route path="/setup" element={<OnboardingPage />} />
                 <Route path="*" element={<NotFoundPage />} />
               </Routes>
             </AppShell>
@@ -53,6 +55,12 @@ for (const route of routes) {
       checks.push(['shows every order status', html.includes('Preparing') && html.includes('Served')]);
       checks.push(['icon buttons have names', html.includes('aria-label="Delete"')]);
       checks.push(['invalid field is marked', html.includes('aria-invalid')]);
+    }
+    if (route === '/setup') {
+      // Signed out during server render, so the wizard must show its loading state
+      // rather than an empty shell or a crash.
+      checks.push(['setup renders without a session', html.length > 500]);
+      checks.push(['setup shows a busy state', html.includes('aria-busy')]);
     }
     if (route === '/orders') {
       checks.push(['unbuilt route says so', html.includes('Nothing is built at /orders')]);

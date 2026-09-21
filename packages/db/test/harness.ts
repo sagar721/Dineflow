@@ -42,8 +42,11 @@ async function readProbe(client: pg.Client, principal: Principal, fx: Fixtures, 
   try {
     return await asPrincipal(client, principal, fx, async (run) =>
       run(async () => {
+        const markerColumn = principal.how.kind === 'public' && spec.publicMarkerColumn
+          ? spec.publicMarkerColumn
+          : spec.markerColumn;
         const { rows } = await client.query<{ tenant: string | null; marker: string | null }>(
-          `select ${spec.tenantColumn}::text as tenant, ${spec.markerColumn} as marker from ${spec.table}`,
+          `select ${spec.tenantColumn}::text as tenant, ${markerColumn} as marker from ${spec.table}`,
         );
         return { denied: false, rows };
       }));
@@ -95,6 +98,14 @@ function insertFor(spec: TableSpec, restaurantId: string, userId: string, acting
     case 'auth_lockouts':
       return { sql: `insert into auth_lockouts (key_hash, key_kind) values ($1, 'ip')`,
                params: [Buffer.from(`probe-${Math.random()}`)] };
+    case 'restaurant_settings':
+      // One row per restaurant already exists, so any insert is a duplicate; the
+      // probe still proves the policy refuses before the constraint would.
+      return { sql: `insert into restaurant_settings (restaurant_id) values ($1)`, params: [restaurantId] };
+    case 'tax_components':
+      return { sql: `insert into tax_components (restaurant_id, name, rate_bps)
+                     values ($1, 'PROBE-${Math.random().toString(36).slice(2, 8)}', 500)`,
+               params: [restaurantId] };
     default:
       throw new Error(`no insert probe declared for ${spec.table}`);
   }
@@ -116,6 +127,10 @@ function updateFor(spec: TableSpec, restaurantId: string): { sql: string; params
       return { sql: `update invitations set revoked_at = now() where restaurant_id = $1`, params: [restaurantId] };
     case 'auth_lockouts':
       return { sql: `update auth_lockouts set failures = failures + 1 where key_kind = 'ip'`, params: [] };
+    case 'restaurant_settings':
+      return { sql: `update restaurant_settings set bill_footer = 'probe' where restaurant_id = $1`, params: [restaurantId] };
+    case 'tax_components':
+      return { sql: `update tax_components set rate_bps = 999 where restaurant_id = $1`, params: [restaurantId] };
     default:
       throw new Error(`no update probe declared for ${spec.table}`);
   }

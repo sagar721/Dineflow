@@ -49,7 +49,7 @@ minimal `auth.users` stand-in; deployed, it points at the Supabase database wher
 |---|---|---|
 | `auth.users` | stand-in created by migration 001 | the real table, owned by `supabase_auth_admin` |
 | Migration role | `postgres` (superuser) | `postgres` (not superuser, but has `BYPASSRLS`) |
-| Direct host | `localhost:55432` | `db.<ref>.supabase.co:5432`, **IPv6 only** |
+| Direct host | `localhost:55432` | `db.<ref>.supabase.co:5432`, **IPv6 only** — a network without IPv6 routing cannot reach it at all, and the connection-pooler endpoint (IPv4) must be enabled in the project for such networks |
 | TLS | none | required; `sslmode=no-verify` works for ad-hoc runs, production should pin Supabase's CA |
 
 Two consequences worth knowing:

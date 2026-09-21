@@ -37,6 +37,16 @@ const schema = z.object({
   /** Where invitation and password-reset links point. */
   APP_BASE_URL: z.string().url(),
 
+  /**
+   * Returns a new restaurant's owner-invitation link in the API response so the
+   * operator can deliver it by hand. It places a live token in a response body, so
+   * it exists only until an email provider is wired and is refused in production.
+   */
+  REVEAL_INVITATION_LINK: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+
   // 'silent' is included for tests, which assert on behaviour rather than logs.
   LOG_LEVEL: z.enum(['silent', 'fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 });
@@ -56,6 +66,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const config = parsed.data;
   if (config.NODE_ENV === 'production' && !config.COOKIE_SECURE) {
     throw new Error('COOKIE_SECURE must be true in production');
+  }
+  if (config.NODE_ENV === 'production' && config.REVEAL_INVITATION_LINK) {
+    throw new Error('REVEAL_INVITATION_LINK must not be enabled in production');
   }
   return config;
 }
