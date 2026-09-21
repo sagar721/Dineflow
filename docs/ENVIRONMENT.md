@@ -13,8 +13,8 @@ No value in this file is ever logged, returned in a response, or committed. Secr
 | `DATABASE_URL` | **yes** | `postgres://dineflow_api:…@host:5432/postgres` | Must use the **`dineflow_api`** role. The API refuses to start if the role is a superuser, has `BYPASSRLS`, or owns tables — any of those would silently disable row-level security. |
 | `WEB_ORIGIN` | **yes** | `https://app.example.com` | The single browser origin allowed to call the API with credentials. No wildcards. |
 | `SUPABASE_URL` | **yes** | `https://abcd.supabase.co` | Project URL. Also the expected JWT issuer. |
-| `SUPABASE_ANON_KEY` | **yes** | `eyJ…` | Used for password grant and refresh. Never sent to the browser. |
-| `SUPABASE_SERVICE_KEY` | **yes** | `eyJ…` | Admin operations (creating a user when an invitation is accepted, revoking sessions). **Full access to the project — treat as the most sensitive value in the system.** Never in the SPA, never in logs. |
+| `SUPABASE_ANON_KEY` | **yes** | `sb_publishable_…` | Used for password grant and refresh. Accepts either the new publishable key or a legacy anon JWT; verified working with both. Never sent to the browser — DineFlow's browser never talks to Supabase at all (D-02). |
+| `SUPABASE_SERVICE_KEY` | **yes** | `sb_secret_…` | Admin operations (creating a user when an invitation is accepted). **Full access to the project — the most sensitive value in the system.** Accepts the new secret key or a legacy service_role JWT. Never in the SPA, never in logs. |
 | `SUPABASE_JWT_SECRET` | no | `super-secret` | Only for legacy HS256 projects. When absent, tokens are verified against the project's JWKS, which is the current and preferred path. **The connected project uses asymmetric ES256 with a JWKS, so leave this unset.** |
 | `COOKIE_SECURE` | no | `true` | `true` in every deployed environment; the API rejects `false` in production. `false` locally drops the `__Host-` cookie prefix, which requires HTTPS. |
 | `TRUST_PROXY_HOPS` | no | `1` | How many trusted proxies sit in front of the API. The client IP is taken from exactly that position in `X-Forwarded-For`; reading the whole chain would let a caller forge an address and evade rate limits. |
@@ -86,7 +86,7 @@ It is deliberately not part of `npm test`: it needs credentials and touches a re
 
 | Secret | When to rotate | How |
 |---|---|---|
-| `SUPABASE_SERVICE_KEY` | On any suspected exposure, and when anyone with access leaves | Rotate in the Supabase dashboard, update the API host's secret, redeploy. Sessions are unaffected. |
+| `SUPABASE_SERVICE_KEY` | On any suspected exposure, and when anyone with access leaves | Create a new secret key in the dashboard, update the API host's secret, redeploy, then delete the old one. Sessions are unaffected. **Creating new-format keys does not disable the legacy anon/service_role JWTs** — those must be disabled separately under Legacy API keys, or the old values keep working. |
 | `SUPABASE_JWT_SECRET` / signing keys | On suspected exposure | Rotating invalidates every issued token, so all staff are signed out. Plan it outside service hours. |
 | `DATABASE_URL` password | Quarterly, and on staff change | `ALTER ROLE dineflow_api WITH PASSWORD …`, update the secret, redeploy. |
 | Backup encryption key | On custodian change | Part 7 §4.4: two custodians, key held offline. |
