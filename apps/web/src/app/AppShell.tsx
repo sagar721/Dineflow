@@ -10,8 +10,8 @@ type NavItem = { to: string; label: string; icon: typeof LayoutDashboard; ready?
 // but sections without a module behind them are marked rather than faked.
 const NAV: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, ready: true },
-  { to: '/orders', label: 'Orders', icon: ClipboardList },
-  { to: '/kitchen', label: 'Kitchen', icon: ChefHat },
+  { to: '/orders', label: 'Orders', icon: ClipboardList, ready: true },
+  { to: '/kitchen', label: 'Kitchen', icon: ChefHat, ready: true },
   { to: '/tables', label: 'Tables & QR', icon: QrCode, ready: true },
   { to: '/menu', label: 'Menu', icon: BookOpen, ready: true },
   { to: '/billing', label: 'Billing', icon: Receipt },

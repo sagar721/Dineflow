@@ -135,7 +135,15 @@ describe('protections during setup', () => {
   test('repeated wrong codes lock the authenticator, and the lock is enforced', async () => {
     const { cookie } = await signIn('owner-a@example.test');
     const started = await enroll(cookie);
-    for (let i = 0; i < 5; i += 1) await confirm(cookie, started.body.factorId, '000000');
+    assert.equal(started.status, 200, `setup: enrollment returned ${started.status} ${JSON.stringify(started.body?.error ?? {})}`);
+    // Each wrong code must be refused *as a wrong code*, so it counts toward the lock.
+    // Anything else would leave the lock untested.
+    const attempts: string[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      const wrong = await confirm(cookie, started.body.factorId, '000000');
+      attempts.push(`${wrong.status}:${wrong.body?.error?.code}`);
+    }
+    assert.deepEqual(attempts, Array(5).fill('401:INVALID_CREDENTIALS'), `wrong-code attempts: ${attempts.join(', ')}`);
 
     // The right code, but locked: before this fix, failures were counted and the
     // lock was never checked, so guessing was limited only by the IP throttle.

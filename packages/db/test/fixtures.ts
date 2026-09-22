@@ -35,7 +35,7 @@ export type Fixtures = {
 export async function seed(admin: pg.Client): Promise<Fixtures> {
   await admin.query(`
     truncate audit_log, invitations, auth_lockouts, support_grants, restaurant_users,
-             order_customers, order_items, orders, order_counters,
+             order_status_history, order_customers, order_items, orders, order_counters,
              menu_items, menu_categories,
              table_qr_tokens, dining_tables, tax_components, restaurant_settings,
              platform_admins, restaurants restart identity cascade;

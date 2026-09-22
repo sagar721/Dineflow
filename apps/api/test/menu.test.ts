@@ -5,7 +5,7 @@ import test, { after, before, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
 import sharp from 'sharp';
-import { bootApp, createTestContext, signToken, TEST_QR_KEYS, type TestContext } from './helpers.ts';
+import { bootLocalApp, createTestContext, signToken, TEST_QR_KEYS, type TestContext } from './helpers.ts';
 import { parseKeyring, signQrToken } from '../src/lib/qr-token.ts';
 import { MemoryImageStore } from '../src/lib/image-store.ts';
 import { MENU_CACHE_TTL_MS, MenuCache } from '../src/lib/menu-cache.ts';
@@ -475,7 +475,7 @@ describe('image upload security (FR-023)', () => {
   });
 
   test('without a configured bucket, upload answers 503 and nothing else breaks', async () => {
-    const bare = bootApp(ctx.db, ctx.provider, {}, { imageStore: null }).app;
+    const bare = (await bootLocalApp(ctx.db, ctx.provider, {}, { imageStore: null })).app;
     const res = await web(request(bare).put(url(`/items/${item.id}/image`)))
       .set('cookie', await cookie(ctx.fixtures.ownerA)).send({ contentType: 'image/png', data: '' });
     assert.equal(res.status, 503);

@@ -14,6 +14,8 @@ import { TablesPage } from '@/features/tables/TablesPage.tsx';
 import { QrSheetPage } from '@/features/tables/QrSheetPage.tsx';
 import { MenuPage } from '@/features/menu/MenuPage.tsx';
 import { OrderStatusPage } from '@/features/order/OrderStatusPage.tsx';
+import { OrdersPage } from '@/features/orders/OrdersPage.tsx';
+import { KitchenPage } from '@/features/orders/KitchenPage.tsx';
 import { TableEntryPage } from '@/features/public/TableEntryPage.tsx';
 import { SecurityPage } from '@/features/auth/SecurityPage.tsx';
 import { ResetPasswordPage } from '@/features/auth/ResetPasswordPage.tsx';
@@ -54,6 +56,8 @@ createRoot(root).render(
                     path="/tables"
                     element={<RequireAuth permission="table.read"><TablesPage /></RequireAuth>}
                   />
+                  <Route path="/orders" element={<RequireAuth permission="order.read"><OrdersPage /></RequireAuth>} />
+                  <Route path="/kitchen" element={<RequireAuth permission="order.read"><KitchenPage /></RequireAuth>} />
                   <Route
                     path="/menu"
                     element={<RequireAuth permission="menu.read"><MenuPage /></RequireAuth>}

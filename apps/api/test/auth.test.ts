@@ -66,9 +66,11 @@ describe('login', () => {
   test('an unknown address returns exactly the same response as a wrong password', async () => {
     const unknown = await login('nobody@example.test', 'wrong-password-entirely');
     const known = await login('owner-a@example.test', 'also-wrong-password');
-    assert.equal(unknown.status, known.status);
-    assert.deepEqual(unknown.body.error.code, known.body.error.code);
-    assert.deepEqual(unknown.body.error.message, known.body.error.message);
+    // On failure, show both responses: an intermittent mismatch here must be diagnosable.
+    const both = `unknown: ${unknown.status} ${JSON.stringify(unknown.body)} | known: ${known.status} ${JSON.stringify(known.body)}`;
+    assert.equal(unknown.status, known.status, both);
+    assert.deepEqual(unknown.body.error?.code, known.body.error?.code, both);
+    assert.deepEqual(unknown.body.error?.message, known.body.error?.message, both);
   });
 
   test('repeated failures lock the account, and the lock is not disclosed', async () => {

@@ -6,7 +6,7 @@ import test, { after, before, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { bootApp, createTestContext, signToken, TEST_QR_KEYS, type TestContext } from './helpers.ts';
+import { bootLocalApp, createTestContext, signToken, TEST_QR_KEYS, type TestContext } from './helpers.ts';
 import { parseKeyring, signQrToken } from '../src/lib/qr-token.ts';
 import { statusTokenHash } from '../src/lib/order-token.ts';
 
@@ -325,14 +325,20 @@ describe('idempotency (FR-038)', () => {
     assert.equal((await place(tokenA, body(), 'not-a-uuid')).status, 400);
   });
 
-  test('ten simultaneous identical requests create exactly one order', async () => {
-    const key = randomUUID();
-    const before = await ordersOf(ctx.fixtures.restaurantA);
-    const results = await Promise.all(Array.from({ length: 10 }, () => place(tokenA, body(), key)));
-    assert.ok(results.every((res) => res.status === 201 || res.status === 200), results.map((r) => r.status).join(','));
-    assert.equal(results.filter((res) => res.status === 201).length, 1);
-    assert.equal(new Set(results.map((res) => res.body.order.ref)).size, 1);
-    assert.equal(await ordersOf(ctx.fixtures.restaurantA), before + 1);
+  test('ten simultaneous identical requests create exactly one order, every time', async () => {
+    // Several rounds: which unique index a racing request trips first varies, and
+    // both must be answered as a replay, never as an error.
+    for (let round = 0; round < 5; round += 1) {
+      const key = randomUUID();
+      const before = await ordersOf(ctx.fixtures.restaurantA);
+      const results = await Promise.all(Array.from({ length: 10 }, () => place(tokenA, body(), key)));
+      assert.ok(results.every((res) => res.status === 201 || res.status === 200),
+        `round ${round}: ${results.map((r) => r.status).join(',')}`);
+      assert.equal(results.filter((res) => res.status === 201).length, 1);
+      assert.equal(new Set(results.map((res) => res.body.order.ref)).size, 1);
+      assert.equal(new Set(results.map((res) => res.body.statusToken)).size, 1, 'every replay gets the same status link');
+      assert.equal(await ordersOf(ctx.fixtures.restaurantA), before + 1);
+    }
   });
 });
 
@@ -510,9 +516,9 @@ describe('the order status page (FR-041, FR-042)', () => {
 // ======================================================================= limits
 describe('abuse limits (FR-044)', () => {
   test('orders from one table are rate limited', async () => {
-    const limited = bootApp(ctx.db, ctx.provider, {}, {
+    const limited = (await bootLocalApp(ctx.db, ctx.provider, {}, {
       orderLimits: { perIp: HIGH, perTable: { limit: 2, windowSeconds: 600 }, perRestaurant: HIGH },
-    }).app;
+    })).app;
     const send = () => web(request(limited).post(`/api/v1/public/tables/${tokenA}/orders`))
       .set('idempotency-key', randomUUID()).send({ items: [{ menuItemId: chai, quantity: 1 }] });
     assert.equal((await send()).status, 201);

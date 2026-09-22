@@ -45,6 +45,8 @@ export const ALLOWED_DEFINER_FUNCTIONS = new Set([
   // customer role cannot read back itself.
   'app.next_order_no',
   'app.check_order_totals',
+  // 010: writes the append-only status history; nobody may insert into it directly.
+  'app.record_order_status',
 ]);
 
 /** Roles that must never hold privileges on DineFlow tables (Part 7 §3, F-1/F-7). */

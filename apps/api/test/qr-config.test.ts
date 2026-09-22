@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto';
 import request from 'supertest';
 import { loadConfig } from '../src/config.ts';
 import {
-  bootApp, capturedLogs, createTestContext, signToken, TEST_QR_KEYS, testEnv, type TestContext,
+  bootLocalApp, capturedLogs, createTestContext, signToken, TEST_QR_KEYS, testEnv, type TestContext,
 } from './helpers.ts';
 
 const secret = () => randomBytes(32).toString('base64url');
@@ -142,7 +142,7 @@ describe('the configured key in use', () => {
   });
 
   test('after a restart with the same key, the printed code still works and reprints identically', async () => {
-    const restarted = bootApp(ctx.db, ctx.provider);
+    const restarted = await bootLocalApp(ctx.db, ctx.provider);
     assert.equal((await scan(restarted.app, printedUrl)).status, 200);
 
     const reprint = await request(restarted.app).get(`/api/v1/restaurant/tables/${tableId}/qr`)
@@ -151,14 +151,14 @@ describe('the configured key in use', () => {
   });
 
   test('an instance configured with a different key rejects the printed code', async () => {
-    const other = bootApp(ctx.db, ctx.provider, { QR_SIGNING_KEYS: `1:${secret()},2:${secret()}` });
+    const other = await bootLocalApp(ctx.db, ctx.provider, { QR_SIGNING_KEYS: `1:${secret()},2:${secret()}` });
     assert.equal((await scan(other.app, printedUrl)).status, 404);
   });
 
   test('adding a key keeps printed codes working; new codes use the new key', async () => {
     // The printed code was signed with key 2 of TEST_QR_KEYS. Keep key 2, add key 3.
     const keyTwo = TEST_QR_KEYS.split(',').find((entry) => entry.startsWith('2:'))!;
-    const rotated = bootApp(ctx.db, ctx.provider, { QR_SIGNING_KEYS: `${keyTwo},3:${secret()}` });
+    const rotated = await bootLocalApp(ctx.db, ctx.provider, { QR_SIGNING_KEYS: `${keyTwo},3:${secret()}` });
     assert.equal((await scan(rotated.app, printedUrl)).status, 200, 'rotation must not strand printed cards');
 
     const created = await web(request(rotated.app).post('/api/v1/restaurant/tables'))
@@ -170,7 +170,7 @@ describe('the configured key in use', () => {
   });
 
   test('removing a key stops every code signed with it', async () => {
-    const retired = bootApp(ctx.db, ctx.provider, { QR_SIGNING_KEYS: `3:${secret()}` });
+    const retired = await bootLocalApp(ctx.db, ctx.provider, { QR_SIGNING_KEYS: `3:${secret()}` });
     assert.equal((await scan(retired.app, printedUrl)).status, 404);
   });
 

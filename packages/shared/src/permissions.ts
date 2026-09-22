@@ -45,6 +45,7 @@ export const PERMISSIONS = {
   'order.status.serve': ['owner', 'manager', 'billing'],
   'order.cancel': ['owner', 'manager', 'kitchen'],
   'order.revert': ['owner', 'manager'],
+  'order.staffNote': ['owner', 'manager', 'kitchen', 'billing'], // FR-059, design/02 §6.7
 
   // Billing
   'bill.read': ['owner', 'manager', 'billing'],

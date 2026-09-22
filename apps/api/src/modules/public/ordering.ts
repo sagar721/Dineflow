@@ -255,10 +255,14 @@ export async function placeOrder(
   try {
     return { created: await attempt(), statusToken };
   } catch (error) {
-    // Two identical requests at once: one commits, the other hits the unique key.
-    // Asking again finds the committed order and answers as a replay.
-    if ((error as { code?: string; constraint?: string }).code === '23505'
-        && (error as { constraint?: string }).constraint === 'orders_restaurant_id_idempotency_key_key') {
+    // Two identical requests at once: one commits, the other hits a unique index.
+    // Which index Postgres checks first varies: the idempotency key, or the status
+    // token's hash (derived from that same key). Either way the other request's order
+    // is now committed, so asking again finds it and answers as a replay. A genuine
+    // clash with a different request would fail the same way again, not be hidden.
+    const { code, constraint } = error as { code?: string; constraint?: string };
+    if (code === '23505' && (constraint === 'orders_restaurant_id_idempotency_key_key'
+                             || constraint === 'orders_public_token_hash_key')) {
       return { created: await attempt(), statusToken };
     }
     throw error;

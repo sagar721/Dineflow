@@ -8,6 +8,7 @@
 import pg from 'pg';
 import { SignJWT } from 'jose';
 import { randomBytes } from 'node:crypto';
+import http from 'node:http';
 import { base32Encode, totp } from './totp.ts';
 import { buildApp } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
@@ -263,7 +264,8 @@ export const capturedLogs: unknown[] = [];
 export const TEST_SUPABASE_URL = SUPABASE_URL;
 
 export type TestContext = {
-  app: ReturnType<typeof buildApp>['app'];
+  /** The app, already listening on IPv4 loopback (see serveLocally). */
+  app: http.Server;
   db: Database;
   owner: pg.Client;
   provider: StubProviderServer;
@@ -293,14 +295,16 @@ export async function createTestContext(options: TestOptions = {}): Promise<Test
   provider.owner = owner;
   const db = new Database(API_URL);
   const built = bootApp(db, provider, {}, options);
+  const app = await serveLocally(built.app as unknown as http.RequestListener);
 
   return {
-    app: built.app,
+    app,
     db,
     owner,
     provider,
     fixtures,
     close: async () => {
+      await closeServers();
       await db.close();
       await owner.end();
     },
@@ -326,6 +330,46 @@ export function testEnv(overrides: Record<string, string | undefined> = {}): Nod
     QR_SIGNING_KEYS: TEST_QR_KEYS,
     ...overrides,
   } as NodeJS.ProcessEnv;
+}
+
+const liveServers = new Set<http.Server>();
+
+/**
+ * Starts the app on IPv4 loopback, and waits until it is listening.
+ *
+ * Left to itself, supertest starts each app with listen(0) — every address ("::") —
+ * and then connects to 127.0.0.1. When another program on this machine already
+ * listens on 127.0.0.1 at the port the OS picked (VS Code's helper processes do, in
+ * the same port range), the OS allows both, and the test's request reaches that
+ * program instead: a random 401 or 404 that is not DineFlow's. That made the suite
+ * fail intermittently. Binding 127.0.0.1 itself means the OS only hands out a port
+ * that is free on that address, so a test can only ever reach its own server.
+ * supertest reuses a server that is already listening, and never closes it.
+ */
+export async function serveLocally(app: http.RequestListener): Promise<http.Server> {
+  const server = http.createServer(app);
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => resolve());
+  });
+  liveServers.add(server);
+  return server;
+}
+
+/** Closes every server this test process started with serveLocally. */
+export async function closeServers(): Promise<void> {
+  const closing = [...liveServers].map((server) => new Promise<void>((resolve) => {
+    server.closeAllConnections();
+    server.close(() => resolve());
+  }));
+  liveServers.clear();
+  await Promise.all(closing);
+}
+
+/** bootApp, served on IPv4 loopback — for tests that need a second app instance. */
+export async function bootLocalApp(...args: Parameters<typeof bootApp>) {
+  const built = bootApp(...args);
+  return { ...built, app: await serveLocally(built.app as unknown as http.RequestListener) };
 }
 
 /**

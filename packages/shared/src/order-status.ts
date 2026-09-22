@@ -44,3 +44,24 @@ export function allowedTransitions(role: StaffRole, from: OrderStatus): OrderSta
 export function requiresReason(to: OrderStatus): boolean {
   return to === 'cancelled';
 }
+
+/** Statuses the kitchen works on: everything before the order reaches the table. */
+export const ACTIVE_STATUSES: readonly OrderStatus[] = ['pending', 'accepted', 'preparing', 'ready'];
+
+/** Roles that may take an order one step back (FR-053, BR-ORD-03). */
+export const REVERT_ROLES: readonly StaffRole[] = ['owner', 'manager'];
+
+/**
+ * The status an order returns to when an owner or manager reverts it one step, or
+ * null when it cannot be reverted. Cancelled is terminal: it is never reverted.
+ * Served → ready is allowed only while the order is on no live bill (BR-ORD-03);
+ * bills do not exist yet, so that condition is checked by the billing module.
+ */
+export function revertTarget(from: OrderStatus): OrderStatus | null {
+  const index = ['pending', 'accepted', 'preparing', 'ready', 'served'].indexOf(from);
+  return index > 0 ? (['pending', 'accepted', 'preparing', 'ready'] as const)[index - 1]! : null;
+}
+
+export function canRevert(role: StaffRole, from: OrderStatus): boolean {
+  return REVERT_ROLES.includes(role) && revertTarget(from) !== null;
+}

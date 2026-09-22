@@ -11,6 +11,10 @@ import { QrSheetPage } from '@/features/tables/QrSheetPage.tsx';
 import { MenuPage } from '@/features/menu/MenuPage.tsx';
 import { OrderStatusPage } from '@/features/order/OrderStatusPage.tsx';
 import { CustomerMenu } from '@/features/order/CustomerMenu.tsx';
+import { OrdersPage } from '@/features/orders/OrdersPage.tsx';
+import { KitchenPage } from '@/features/orders/KitchenPage.tsx';
+import { KitchenBoard } from '@/features/orders/KitchenBoard.tsx';
+import type { OrderSummary } from '@/features/orders/api.ts';
 import type { PublicMenu } from '@/features/order/api.ts';
 import { TableEntryPage } from '@/features/public/TableEntryPage.tsx';
 import { SecurityPage } from '@/features/auth/SecurityPage.tsx';
@@ -20,7 +24,7 @@ import { DashboardPage } from '@/features/dashboard/DashboardPage.tsx';
 import { DesignPage } from '@/features/design/DesignPage.tsx';
 import { NotFoundPage } from '@/app/NotFoundPage.tsx';
 
-const routes = ['/', '/design', '/orders', '/login', '/accept-invite', '/setup', '/tables', '/menu', '/t/sample-token', '/security', '/reset-password', '/tables/qr-sheet', '/o/sample-status-token'];
+const routes = ['/', '/design', '/orders', '/login', '/accept-invite', '/setup', '/tables', '/menu', '/kitchen', '/billing', '/t/sample-token', '/security', '/reset-password', '/tables/qr-sheet', '/o/sample-status-token'];
 let failures = 0;
 
 for (const route of routes) {
@@ -48,6 +52,8 @@ for (const route of routes) {
                 <Route path="/setup" element={<OnboardingPage />} />
                 <Route path="/tables" element={<TablesPage />} />
                 <Route path="/menu" element={<MenuPage />} />
+                <Route path="/orders" element={<OrdersPage />} />
+                <Route path="/kitchen" element={<KitchenPage />} />
                 <Route path="/security" element={<SecurityPage />} />
                 <Route path="*" element={<NotFoundPage />} />
               </Routes>
@@ -87,6 +93,10 @@ for (const route of routes) {
       checks.push(['security page shows a busy state', html.includes('aria-busy')]);
       checks.push(['no authenticator key in the initial markup', !/[A-Z2-7]{32}/.test(html)]);
     }
+    if (route === '/orders' || route === '/kitchen') {
+      checks.push(['order screen shows a busy state while loading', html.includes('aria-busy')]);
+      checks.push(['order screen shows its connection state', /Reconnecting|Live|Not receiving/.test(html)]);
+    }
     if (route === '/menu') {
       checks.push(['menu editor shows a busy state while loading', html.includes('aria-busy')]);
       checks.push(['menu editor has its heading', html.includes('>Menu<')]);
@@ -111,8 +121,9 @@ for (const route of routes) {
       checks.push(['customer page shows no staff navigation', !html.includes('Skip to main content')]);
       checks.push(['customer page does not echo the token', !html.includes('sample-token')]);
     }
-    if (route === '/orders') {
-      checks.push(['unbuilt route says so', html.includes('Nothing is built at /orders')]);
+    // /orders is built now; /billing is still a placeholder, so it carries this check.
+    if (route === '/billing') {
+      checks.push(['unbuilt route says so', html.includes('Nothing is built at /billing')]);
     }
     if (route === '/login') {
       checks.push(['password field is a password input', html.includes('type="password"')]);
@@ -175,6 +186,35 @@ for (const route of routes) {
   for (const [name, ok] of checks) {
     if (!ok) failures += 1;
     console.log(`  ${ok ? 'ok  ' : 'FAIL'} customer menu — ${name}`);
+  }
+}
+
+// The kitchen board with fixed orders: each role sees exactly its next step, and
+// nothing on the board carries customer contact details.
+{
+  const order = (n: number, status: OrderSummary['status'], minutesAgo: number): OrderSummary => ({
+    id: `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`, ref: String(n), number: n, status,
+    placedAt: new Date(Date.UTC(2026, 8, 22, 12, 0) - minutesAgo * 60_000).toISOString(),
+    statusUpdatedAt: new Date(Date.UTC(2026, 8, 22, 12, 0)).toISOString(), subtotalMinor: 6000, itemCount: 2, version: 1,
+    table: { id: 't', tableNumber: '4', name: null }, items: [{ name: 'Masala Dosa', quantity: 2, note: 'No onion' }],
+    specialInstructions: null, staffNote: null, cancelReason: null,
+  });
+  const orders = [order(11, 'pending', 3), order(12, 'ready', 20), order(13, 'served', 40)];
+  const now = Date.UTC(2026, 8, 22, 12, 0);
+  const noop = () => undefined;
+  const kitchen = renderToString(<KitchenBoard orders={orders} role="kitchen" now={now} busyId={null} onAdvance={noop} onOpen={noop} />);
+  const billing = renderToString(<KitchenBoard orders={orders} role="billing" now={now} busyId={null} onAdvance={noop} onOpen={noop} />);
+  const checks: [string, boolean][] = [
+    ['kitchen can accept a pending order', /Accept<span class="sr-only"> — order (<!-- -->)?11</.test(kitchen)],
+    ['kitchen cannot serve a ready order', !/Mark served/.test(kitchen)],
+    ['billing can serve a ready order and do nothing else', /Mark served/.test(billing) && !/Accept</.test(billing)],
+    ['served orders are not on the board', !kitchen.includes('#<!-- -->13') && !kitchen.includes('>#13<')],
+    ['a long wait is flagged', kitchen.includes('waiting a long time') && kitchen.includes('20 min')],
+    ['item notes are shown', kitchen.includes('No onion')],
+  ];
+  for (const [name, ok] of checks) {
+    if (!ok) failures += 1;
+    console.log(`  ${ok ? 'ok  ' : 'FAIL'} kitchen board — ${name}`);
   }
 }
 

@@ -94,7 +94,7 @@ Migration `009_orders.sql` adds `order_counters`, `orders`, `order_items` and `o
 | Platform admin with a support grant | read | none | — |
 | Customer (QR) | insert own (new, pending, only while accepting); read **only with the status token** | insert own | via `app.next_order_no()` only |
 
-- **No role may update or delete** an order, line or contact row yet. The status workflow is the next module.
+- **No role may delete** an order, line or contact row, and lines and contact rows are never updated. Staff may change only an order's workflow columns (status, cancel reason, staff note), under the rules in [module 6](06-orders-and-kitchen.md).
 - There are two new reviewed SECURITY DEFINER functions: `app.next_order_no` and `app.check_order_totals`. Customers may now also read the `order_prefix` column of their restaurant's settings.
 - **Isolation harness:** 714 declared cells, 1,613 checks, including all four new tables.
 
@@ -140,6 +140,6 @@ Verified **locally only**, against the local Docker database. Nothing here has r
 - **FR-044 bot protection (Turnstile) is not built.** It needs a Cloudflare account and a server secret. The in-app rate limits are in place.
 - **FR-045 customer cancellation** (a Should) is deferred to the orders module. It needs the status history and the cancellation reason (FR-054, FR-055), which come with the state machine.
 - **Estimated taxes (D-17)** are not shown. The customer sees the server-computed **subtotal**, labelled "taxes, if any, on your bill". The shared tax function will come with Billing, and the estimate will use it then.
-- **Status updates** use polling every 15 s (FR-041). Staff can't change status until the next module, so orders stay `pending`.
+- **Status updates** use polling every 15 s (FR-041). Staff now move orders through their statuses; see [module 6](06-orders-and-kitchen.md).
 - **Table occupancy and permanent table deletion** still wait for the orders module's status workflow.
 - **Rate-limit counters** are in memory, per API process (as before).

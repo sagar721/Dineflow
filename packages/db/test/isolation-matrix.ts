@@ -236,9 +236,33 @@ export const TABLES: TableSpec[] = [
     tenantColumn: 'restaurant_id',
     markerColumn: "coalesce(special_instructions, '')",
     cells: {
-      // Every staff role reads its restaurant's orders; nobody changes one yet (the
-      // status workflow is the next module). Customers place orders but can read one
-      // back only with its status token, which a probe does not hold.
+      // Every staff role reads and works on its restaurant's orders (which status
+      // changes each may make is the database guard's decision, tested in the API
+      // suite). Customers place orders but can read one back only with its status
+      // token, which a probe does not hold.
+      'owner-A':        { read: 'own',  insertOwn: 'deny',  updateOwn: 'allow' },
+      'manager-A':      { read: 'own',  insertOwn: 'deny',  updateOwn: 'allow' },
+      'kitchen-A':      { read: 'own',  insertOwn: 'deny',  updateOwn: 'allow' },
+      'billing-A':      { read: 'own',  insertOwn: 'deny',  updateOwn: 'allow' },
+      'deactivated-A':  deny('none'),
+      'owner-S':        deny('none'),
+      'owner-B':        { read: 'own',  insertOwn: 'deny',  updateOwn: 'allow' },
+      'owner-P':        { read: 'own',  insertOwn: 'deny',  updateOwn: 'allow' },
+      'admin-no-mfa':   deny('none'),
+      'admin':          deny('none'),
+      'admin-granted':  { read: 'own',  insertOwn: 'deny',  updateOwn: 'deny' },
+      'public-A':       { read: 'none', insertOwn: 'allow', updateOwn: 'deny' },
+      'public-none':    deny('none'),
+      'api-no-context': deny('none'),
+    },
+  },
+  {
+    table: 'order_status_history',
+    tenantColumn: 'restaurant_id',
+    markerColumn: "coalesce((select o.special_instructions from orders o where o.id = order_id), '')",
+    cells: {
+      // Every staff role reads its restaurant's history; nobody writes or edits it.
+      // Rows come only from the status trigger, and the table is append-only.
       'owner-A':        { read: 'own',  insertOwn: 'deny',  updateOwn: 'deny' },
       'manager-A':      { read: 'own',  insertOwn: 'deny',  updateOwn: 'deny' },
       'kitchen-A':      { read: 'own',  insertOwn: 'deny',  updateOwn: 'deny' },
@@ -250,7 +274,7 @@ export const TABLES: TableSpec[] = [
       'admin-no-mfa':   deny('none'),
       'admin':          deny('none'),
       'admin-granted':  { read: 'own',  insertOwn: 'deny',  updateOwn: 'deny' },
-      'public-A':       { read: 'none', insertOwn: 'allow', updateOwn: 'deny' },
+      'public-A':       deny('none'),
       'public-none':    deny('none'),
       'api-no-context': deny('none'),
     },

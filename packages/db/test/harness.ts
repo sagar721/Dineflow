@@ -140,6 +140,9 @@ function insertFor(spec: TableSpec, restaurantId: string, userId: string, acting
     case 'order_customers':
       return { sql: `insert into order_customers (order_id, restaurant_id, mobile) values ($1, $2, '9811111111')`,
                params: [target?.order ?? null, restaurantId] };
+    case 'order_status_history':
+      return { sql: `insert into order_status_history (restaurant_id, order_id, to_status) values ($1, $2, 'served')`,
+               params: [restaurantId, target?.order ?? null] };
     case 'menu_categories':
       return { sql: `insert into menu_categories (restaurant_id, name) values ($1, $2)`,
                params: [restaurantId, `PROBE-${Math.random().toString(36).slice(2, 8)}`] };
@@ -181,8 +184,12 @@ function updateFor(spec: TableSpec, restaurantId: string): { sql: string; params
       return { sql: `update tax_components set rate_bps = 999 where restaurant_id = $1`, params: [restaurantId] };
     case 'order_counters':
       return { sql: `update order_counters set next_no = next_no + 1 where restaurant_id = $1`, params: [restaurantId] };
+    // The staff note: a change every staff role may make (FR-059). The amounts,
+    // items and table of a placed order can never change (tested in the API suite).
     case 'orders':
-      return { sql: `update orders set subtotal_minor = subtotal_minor + 1 where restaurant_id = $1`, params: [restaurantId] };
+      return { sql: `update orders set staff_note = 'PROBE note' where restaurant_id = $1`, params: [restaurantId] };
+    case 'order_status_history':
+      return { sql: `update order_status_history set reason = 'tampered' where restaurant_id = $1`, params: [restaurantId] };
     case 'order_items':
       return { sql: `update order_items set unit_price_minor = 1 where restaurant_id = $1`, params: [restaurantId] };
     case 'order_customers':
