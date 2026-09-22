@@ -11,6 +11,7 @@ import { runSchemaGuards } from '../src/schema-guard.ts';
 import { seed } from './fixtures.ts';
 import { runContextLeakChecks, runIsolationMatrix, type Check } from './harness.ts';
 import { runCanaries } from './canaries.ts';
+import { runLedgerChecks } from './ledger-checks.ts';
 
 const OWNER_URL = process.env.DATABASE_URL ?? 'postgres://postgres:dineflow_local_only@localhost:55432/dineflow';
 const API_PASSWORD = process.env.DINEFLOW_API_PASSWORD ?? 'dineflow_api_local_only';
@@ -80,6 +81,9 @@ failures += report('Schema guards (ISO-01, ISO-02)', [
 const fixtures = await seed(owner);
 const { checks: matrixChecks, cells } = await runIsolationMatrix(api, fixtures);
 failures += report(`Isolation matrix (ISO-03 … ISO-06) — ${cells} declared cells`, matrixChecks);
+
+// 3b. The billing ledger verifies, and tampering is detected (Stage-2 5.1–5.3).
+failures += report('Billing ledger', await runLedgerChecks(owner, fixtures));
 
 // 4. Connection reuse (ISO-07).
 failures += report('Request context isolation (ISO-07)', await runContextLeakChecks(api, fixtures));

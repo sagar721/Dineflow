@@ -17,6 +17,8 @@ import { tableRoutes } from './modules/tables/routes.ts';
 import { publicRoutes, type OrderLimits, type PublicMenu } from './modules/public/routes.ts';
 import { menuRoutes } from './modules/menu/routes.ts';
 import { orderRoutes } from './modules/orders/routes.ts';
+import { billingRoutes } from './modules/billing/routes.ts';
+import { reportRoutes } from './modules/reports/routes.ts';
 import { SupabaseImageStore, type ImageStore } from './lib/image-store.ts';
 import { MenuCache } from './lib/menu-cache.ts';
 import { parseKeyring } from './lib/qr-token.ts';
@@ -118,6 +120,10 @@ export function buildApp(deps: AppDeps): BuiltApp {
     qrDomainFinal: config.QR_DOMAIN_FINAL,
   }));
   app.use('/api/v1/restaurant/orders', orderRoutes({ db, verify, cookieSecure: config.COOKIE_SECURE }));
+  const billing = billingRoutes({ db, verify, cookieSecure: config.COOKIE_SECURE });
+  app.use('/api/v1/restaurant/bills', billing.bills);
+  app.use('/api/v1/restaurant/payments', billing.payments);
+  app.use('/api/v1/restaurant/reports', reportRoutes({ db, verify, cookieSecure: config.COOKIE_SECURE }));
   app.use('/api/v1/restaurant/menu', menuRoutes({
     db, verify, cookieSecure: config.COOKIE_SECURE, logger, imageStore, menuCache,
   }));

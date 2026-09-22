@@ -19,6 +19,7 @@ import pg from 'pg';
 import { migrate } from '../../packages/db/src/migrate.ts';
 import { runSchemaGuards } from '../../packages/db/src/schema-guard.ts';
 import { seed } from '../../packages/db/test/fixtures.ts';
+import { verifyBillingLedger } from '../../packages/db/src/billing-ledger.ts';
 
 const CONTAINER = process.env.DINEFLOW_PG_CONTAINER ?? 'dineflow-pg';
 const PORT = process.env.DINEFLOW_PG_PORT ?? '55432';
@@ -82,6 +83,15 @@ try {
         union all select 'staff:' || id || role || status || coalesce(display_name, '') from restaurant_users
         union all select 'grants:' || id || reason from support_grants
         union all select 'audit:' || id || action || summary::text from audit_log) s`),
+    // Bills, payments and the billing ledger: every issued bill's content hash and
+    // every ledger entry's hash, so a restore that lost or altered one is caught.
+    billing: await client.query(`
+      select md5(string_agg(sig, '|' order by sig)) as hash from (
+        select 'bill:' || id || status || coalesce(bill_no::text, '') || total_minor || coalesce(encode(content_hash, 'hex'), '') as sig from bills
+        union all select 'payment:' || id || amount_minor || coalesce(reversed_at::text, '') from payments
+        union all select 'counter:' || restaurant_id || series || next_no from bill_counters
+        union all select 'ledger:' || restaurant_id || ':' || seq || ':' || encode(entry_hash, 'hex') from bill_ledger
+        union all select 'head:' || restaurant_id || ':' || seq || ':' || encode(last_hash, 'hex') from bill_ledger_heads) s`),
     counts: await client.query(`
       select (select count(*) from restaurants) || '/' ||
              (select count(*) from restaurant_users) || '/' ||
@@ -90,6 +100,9 @@ try {
   });
 
   const before = await fingerprint(sourceClient);
+  const sourceLedger = await verifyBillingLedger(sourceClient);
+  check('source billing ledger verifies before the backup', sourceLedger.ok && sourceLedger.entries > 0,
+    sourceLedger.findings.map((f) => f.check).join(', '));
   await sourceClient.end();
   sourceClient = undefined;
 
@@ -148,7 +161,7 @@ try {
   const after = await fingerprint(targetClient);
 
   // ----------------------------------------------------------------- 5. verify
-  for (const key of ['schema', 'policies', 'rls', 'grants', 'data', 'counts']) {
+  for (const key of ['schema', 'policies', 'rls', 'grants', 'data', 'billing', 'counts']) {
     const a = before[key].rows[0].hash;
     const b = after[key].rows[0].hash;
     check(`restored ${key} matches the source`, a === b, `source=${a} restored=${b}`);
@@ -162,6 +175,24 @@ try {
     select count(*) from (
       select conrelid::regclass::text as t, conname from pg_constraint where contype = 'f') c`);
   check('foreign keys present after restore', Number(brokenFks) > 0, `${brokenFks} constraints`);
+
+  // The billing ledger recomputes on the restored copy: chains, bill content
+  // hashes, gap-free numbers, and counters that will not reissue a number.
+  const restoredLedger = await verifyBillingLedger(targetClient);
+  check('restored billing ledger verifies (chains, content hashes, numbering)', restoredLedger.ok
+    && restoredLedger.entries === sourceLedger.entries && restoredLedger.issuedBills === sourceLedger.issuedBills,
+    restoredLedger.findings.map((f) => `${f.check}: ${f.detail}`).join('; '));
+  const counters = await targetClient.query(`
+    select count(*)::int as behind from bill_counters c
+     where c.next_no <= coalesce((select max(bill_no) from bills b where b.restaurant_id = c.restaurant_id and b.bill_series = c.series), 0)`);
+  check('restored bill counters are ahead of every issued number', counters.rows[0].behind === 0);
+
+  // Tamper test: an edited ledger entry on the restored copy must be detected.
+  await targetClient.query('alter table bill_ledger disable trigger trg_bill_ledger_append_only');
+  await targetClient.query(`update bill_ledger set payload = '{"tampered": true}' where seq = 1`);
+  const tamperedLedger = await verifyBillingLedger(targetClient);
+  check('a modified ledger entry is detected on the restored copy',
+    !tamperedLedger.ok && tamperedLedger.findings.some((f) => f.check === 'chain-hash'));
 
   // Tamper test: a changed row must show up as a checksum mismatch.
   await targetClient.query(`update restaurants set name = name || ' tampered' where slug = 'tenant-a'`);

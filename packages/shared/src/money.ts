@@ -30,6 +30,20 @@ export function formatMoney(minor: number, currency: Currency, locale = 'en-IN')
   }).format(minor / divisor);
 }
 
+/**
+ * Minor units as a plain decimal string for machine-readable output such as CSV,
+ * e.g. 24950 → "249.50", -40 → "-0.40". Integer arithmetic only.
+ */
+export function minorToDecimal(minor: number, currency: Currency): string {
+  assertSafe(minor);
+  const divisor = MINOR_UNITS[currency];
+  const digits = divisor.toString().length - 1;
+  const sign = minor < 0 ? '-' : '';
+  const abs = Math.abs(minor);
+  const whole = Math.floor(abs / divisor);
+  return digits ? `${sign}${whole}.${String(abs % divisor).padStart(digits, '0')}` : `${sign}${whole}`;
+}
+
 /** Parses typed input ("249.5", "1,249.50") into minor units. */
 export function parseMoney(input: string, currency: Currency): number {
   const cleaned = input.replace(/[\s,]/g, '');

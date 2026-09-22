@@ -14,6 +14,11 @@ import { CustomerMenu } from '@/features/order/CustomerMenu.tsx';
 import { OrdersPage } from '@/features/orders/OrdersPage.tsx';
 import { KitchenPage } from '@/features/orders/KitchenPage.tsx';
 import { KitchenBoard } from '@/features/orders/KitchenBoard.tsx';
+import { BillingPage } from '@/features/billing/BillingPage.tsx';
+import { SalesReportPage } from '@/features/billing/SalesReportPage.tsx';
+import { BillPrintPage } from '@/features/billing/BillPrintPage.tsx';
+import { BillDocument } from '@/features/billing/BillDocument.tsx';
+import type { Bill } from '@/features/billing/api.ts';
 import type { OrderSummary } from '@/features/orders/api.ts';
 import type { PublicMenu } from '@/features/order/api.ts';
 import { TableEntryPage } from '@/features/public/TableEntryPage.tsx';
@@ -24,14 +29,15 @@ import { DashboardPage } from '@/features/dashboard/DashboardPage.tsx';
 import { DesignPage } from '@/features/design/DesignPage.tsx';
 import { NotFoundPage } from '@/app/NotFoundPage.tsx';
 
-const routes = ['/', '/design', '/orders', '/login', '/accept-invite', '/setup', '/tables', '/menu', '/kitchen', '/billing', '/t/sample-token', '/security', '/reset-password', '/tables/qr-sheet', '/o/sample-status-token'];
+const routes = ['/', '/design', '/orders', '/login', '/accept-invite', '/setup', '/tables', '/menu', '/kitchen', '/billing', '/billing/sales', '/billing/sample-bill-id/print', '/staff', '/t/sample-token', '/security', '/reset-password', '/tables/qr-sheet', '/o/sample-status-token'];
 let failures = 0;
 
 for (const route of routes) {
   try {
     // Rendered without the app shell (the QR sheet is printed bare), so no skip link.
     const signedOut = route === '/login' || route === '/accept-invite' || route.startsWith('/t/')
-      || route === '/reset-password' || route === '/tables/qr-sheet' || route.startsWith('/o/');
+      || route === '/reset-password' || route === '/tables/qr-sheet' || route.startsWith('/o/')
+      || route.endsWith('/print');
     const html = renderToString(
       <MemoryRouter initialEntries={[route]}>
         <SessionProvider>
@@ -43,6 +49,7 @@ for (const route of routes) {
               <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route path="/tables/qr-sheet" element={<QrSheetPage />} />
               <Route path="/o/:statusToken" element={<OrderStatusPage />} />
+              <Route path="/billing/:id/print" element={<BillPrintPage />} />
             </Routes>
           ) : (
             <AppShell>
@@ -54,6 +61,8 @@ for (const route of routes) {
                 <Route path="/menu" element={<MenuPage />} />
                 <Route path="/orders" element={<OrdersPage />} />
                 <Route path="/kitchen" element={<KitchenPage />} />
+                <Route path="/billing" element={<BillingPage />} />
+                <Route path="/billing/sales" element={<SalesReportPage />} />
                 <Route path="/security" element={<SecurityPage />} />
                 <Route path="*" element={<NotFoundPage />} />
               </Routes>
@@ -121,9 +130,21 @@ for (const route of routes) {
       checks.push(['customer page shows no staff navigation', !html.includes('Skip to main content')]);
       checks.push(['customer page does not echo the token', !html.includes('sample-token')]);
     }
-    // /orders is built now; /billing is still a placeholder, so it carries this check.
+    // /billing is built now; /staff is still a placeholder, so it carries this check.
+    if (route === '/staff') {
+      checks.push(['unbuilt route says so', html.includes('Nothing is built at /staff')]);
+    }
     if (route === '/billing') {
-      checks.push(['unbuilt route says so', html.includes('Nothing is built at /billing')]);
+      checks.push(['billing page has its heading while loading', html.includes('Billing')]);
+      checks.push(['billing page shows a busy state', html.includes('aria-busy')]);
+    }
+    if (route === '/billing/sales') {
+      checks.push(['sales report has its heading while loading', html.includes('Sales report')]);
+      checks.push(['sales report offers CSV export', html.includes('Export CSV')]);
+    }
+    if (route.endsWith('/print')) {
+      checks.push(['print page carries no app navigation', !html.includes('Skip to main content')]);
+      checks.push(['print page offers both paper sizes', html.includes('80 mm roll') && html.includes('A4')]);
     }
     if (route === '/login') {
       checks.push(['password field is a password input', html.includes('type="password"')]);
@@ -215,6 +236,38 @@ for (const route of routes) {
   for (const [name, ok] of checks) {
     if (!ok) failures += 1;
     console.log(`  ${ok ? 'ok  ' : 'FAIL'} kitchen board — ${name}`);
+  }
+}
+
+// A bill with fixed data: every part FR-071 requires, from the stored snapshot.
+{
+  const bill: Bill = {
+    id: 'b', status: 'void', paymentStatus: null, series: 'main', number: 7, ref: '7',
+    table: { id: 't', tableNumber: '4', name: null },
+    orders: [{ id: 'o1', ref: '11', status: 'served', released: true }, { id: 'o2', ref: '12', status: 'served', released: true }],
+    currency: 'INR', pricesIncludeTax: false, serviceChargeBps: 1000, roundingMode: 'nearest_1',
+    lines: [{ name: 'Masala Dosa', quantity: 2, unitPriceMinor: 12_000, lineTotalMinor: 24_000 }],
+    taxes: [{ name: 'CGST', rateBps: 250, taxableMinor: 21_600, amountMinor: 540 }, { name: 'SGST', rateBps: 250, taxableMinor: 21_600, amountMinor: 540 }],
+    subtotalMinor: 24_000, discount: { type: 'percent', value: 1000, reason: 'Regular guest' }, discountMinor: 2_400,
+    serviceChargeMinor: 2_160, taxTotalMinor: 1_080, roundingMinor: -40, totalMinor: 24_800,
+    issuer: { name: 'Spice Garden', addressLines: ['12 MG Road', 'Kochi, Kerala, 682001'], phone: '0484 000 0000',
+      taxRegistrationNo: 'TEST-REG-1', footer: 'Thank you' },
+    contentHash: null, createdAt: '2026-09-22T12:00:00Z', createdBy: null, finalizedAt: '2026-09-22T12:05:00Z', finalizedBy: null,
+    voidedAt: '2026-09-22T12:10:00Z', voidedBy: null, voidReason: 'Wrong table', payments: [], version: 3,
+  };
+  const html = renderToString(<BillDocument bill={bill} timezone="Asia/Kolkata" />);
+  const checks: [string, boolean][] = [
+    ['issuer, address and tax registration', html.includes('Spice Garden') && html.includes('12 MG Road') && html.includes('TEST-REG-1')],
+    ['bill number, table and every order', html.includes('>7<') && html.includes('#11, #12')],
+    ['each tax line with its rate', html.includes('CGST 2.5 %') && html.includes('SGST 2.5 %')],
+    ['discount, service charge and rounding shown', html.includes('Regular guest') && html.includes('Service charge 10 %') && html.includes('Rounding')],
+    ['total formatted from minor units', html.includes('₹248.00')],
+    ['a void bill says so', html.includes('Void') && html.includes('Wrong table')],
+    ['footer', html.includes('Thank you')],
+  ];
+  for (const [name, ok] of checks) {
+    if (!ok) failures += 1;
+    console.log(`  ${ok ? 'ok  ' : 'FAIL'} bill document — ${name}`);
   }
 }
 

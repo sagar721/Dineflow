@@ -67,10 +67,11 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
  * A file from the API, such as a QR code image. Same credentials, CSRF header and
  * error handling as apiFetch, but the successful body is returned as a Blob.
  */
-export async function apiFetchBlob(path: string): Promise<Blob> {
+export async function apiFetchBlob(path: string, options: { method?: string } = {}): Promise<Blob> {
   let response: Response;
   try {
     response = await fetch(`${BASE}/api/v1${path}`, {
+      method: options.method ?? 'GET',
       credentials: 'include',
       headers: { 'x-dineflow-client': 'web' },
     });

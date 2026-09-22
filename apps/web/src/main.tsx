@@ -16,6 +16,9 @@ import { MenuPage } from '@/features/menu/MenuPage.tsx';
 import { OrderStatusPage } from '@/features/order/OrderStatusPage.tsx';
 import { OrdersPage } from '@/features/orders/OrdersPage.tsx';
 import { KitchenPage } from '@/features/orders/KitchenPage.tsx';
+import { BillingPage } from '@/features/billing/BillingPage.tsx';
+import { BillPrintPage } from '@/features/billing/BillPrintPage.tsx';
+import { SalesReportPage } from '@/features/billing/SalesReportPage.tsx';
 import { TableEntryPage } from '@/features/public/TableEntryPage.tsx';
 import { SecurityPage } from '@/features/auth/SecurityPage.tsx';
 import { ResetPasswordPage } from '@/features/auth/ResetPasswordPage.tsx';
@@ -44,6 +47,11 @@ createRoot(root).render(
             path="/tables/qr-sheet"
             element={<RequireAuth permission="qr.read"><QrSheetPage /></RequireAuth>}
           />
+          {/* Outside the shell so that printing gives only the bill. */}
+          <Route
+            path="/billing/:id/print"
+            element={<RequireAuth permission="bill.read"><BillPrintPage /></RequireAuth>}
+          />
 
           <Route
             path="*"
@@ -58,6 +66,8 @@ createRoot(root).render(
                   />
                   <Route path="/orders" element={<RequireAuth permission="order.read"><OrdersPage /></RequireAuth>} />
                   <Route path="/kitchen" element={<RequireAuth permission="order.read"><KitchenPage /></RequireAuth>} />
+                  <Route path="/billing" element={<RequireAuth permission="bill.read"><BillingPage /></RequireAuth>} />
+                  <Route path="/billing/sales" element={<RequireAuth permission="report.sales"><SalesReportPage /></RequireAuth>} />
                   <Route
                     path="/menu"
                     element={<RequireAuth permission="menu.read"><MenuPage /></RequireAuth>}

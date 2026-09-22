@@ -16,6 +16,8 @@ export type OrderDetail = OrderSummary & {
   history: { from: OrderStatus | null; to: OrderStatus; byRole: StaffRole | null; reason: string | null; at: string }[];
   /** Present only for roles allowed contact details; null when the customer gave none. */
   contact?: { mobile: string | null; email: string | null } | null;
+  /** Present only for roles that work with bills: the live bill this order is on, if any. */
+  bill?: { id: string; status: 'draft' | 'finalized'; ref: string | null } | null;
   timezone: string;
   currency: Currency;
 };

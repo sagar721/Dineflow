@@ -5,6 +5,7 @@
 // anywhere in the result", which catches leaks that a count-based assertion misses.
 import pg from 'pg';
 import { createHash, randomBytes } from 'node:crypto';
+import { canonicalBillText, computeBill } from '../../shared/src/bill.ts';
 
 export const MARKER = {
   A: 'MARKER-TENANT-A',
@@ -27,7 +28,11 @@ export type Fixtures = {
    * themselves (they reach tables only through a QR), so the probe is given them.
    * `order` has no contact row, so a contact insert probe does not collide.
    */
-  probeTargets: Record<string, { table: string; menuItem: string; order: string }>;
+  probeTargets: Record<string, {
+    table: string; menuItem: string; order: string;
+    /** Billing (011): an empty draft, a finalized unpaid bill and its total, and an order line. */
+    draftBill?: string; unpaidBill?: string; unpaidTotal?: number; orderItem?: string;
+  }>;
   grantIdA: string;
 };
 
@@ -35,6 +40,7 @@ export type Fixtures = {
 export async function seed(admin: pg.Client): Promise<Fixtures> {
   await admin.query(`
     truncate audit_log, invitations, auth_lockouts, support_grants, restaurant_users,
+             bill_ledger, bill_ledger_heads, payments, bill_taxes, bill_lines, bill_orders, bills, bill_counters,
              order_status_history, order_customers, order_items, orders, order_counters,
              menu_items, menu_categories,
              table_qr_tokens, dining_tables, tax_components, restaurant_settings,
@@ -171,6 +177,90 @@ export async function seed(admin: pg.Client): Promise<Fixtures> {
     await admin.query(`insert into order_counters (restaurant_id, next_no) values ($1, 3)`, [rid]);
     probeTargets[rid] = { table: table[0]!.id, menuItem: spare[0]!.id, order: orderIds[1]! };
   }
+  // Billing (011): per restaurant, bill 1 (finalized and paid, for order 1), bill 2
+  // (finalized, unpaid, for a third order) and an empty draft — so every billing
+  // table has rows that could leak, and insert probes have legitimate targets.
+  for (const [rid, owner, marker] of [[restaurantA, ownerA, MARKER.A], [restaurantB, ownerB, MARKER.B],
+                                      [restaurantS, ownerS, MARKER.S], [restaurantP, ownerP, MARKER.P]] as const) {
+    const target = probeTargets[rid]!;
+    const { rows: [orderOne] } = await admin.query<{ id: string }>(
+      `select id from orders where restaurant_id = $1 and order_no = 1`, [rid]);
+    const { rows: [paneer] } = await admin.query<{ id: string }>(
+      `select id from menu_items where restaurant_id = $1 and name like '%Paneer Tikka'`, [rid]);
+    await admin.query('begin');
+    const { rows: [orderThree] } = await admin.query<{ id: string }>(
+      `insert into orders (restaurant_id, table_id, order_no, order_ref, subtotal_minor, special_instructions,
+                           public_token_hash, idempotency_key, request_hash)
+       values ($1, $2, 3, '3', 24900, $3, $4, gen_random_uuid(), $5) returning id`,
+      [rid, target.table, marker, randomBytes(32), randomBytes(32)]);
+    await admin.query(
+      `insert into order_items (restaurant_id, order_id, menu_item_id, position, name_snapshot, unit_price_minor, quantity)
+       values ($1, $2, $3, 1, $4, 24900, 1)`, [rid, orderThree!.id, paneer!.id, `${marker} Paneer Tikka`]);
+    await admin.query('commit');
+    await admin.query(`update order_counters set next_no = 4 where restaurant_id = $1`, [rid]);
+
+    const issuer = { name: `${marker} Restaurant`, address: null, phone: null, taxRegistrationNo: null, footer: null };
+    const makeBill = async (orderId: string, billNo: number | null) => {
+      const { rows: lines } = await admin.query<{ id: string; name_snapshot: string; quantity: number; unit_price_minor: string }>(
+        `select id, name_snapshot, quantity, unit_price_minor from order_items where order_id = $1 order by position`, [orderId]);
+      const totals = computeBill({
+        lines: lines.map((l) => ({ unitPriceMinor: Number(l.unit_price_minor), quantity: l.quantity })),
+        pricesIncludeTax: true, taxes: [{ name: `${marker} GST`, rateBps: 500 }], serviceChargeBps: 0,
+        discount: null, roundingMode: 'none',
+      });
+      const { rows: [bill] } = await admin.query<{ id: string }>(
+        `insert into bills (restaurant_id, table_id, currency, prices_include_tax, service_charge_bps, rounding_mode,
+                            subtotal_minor, service_charge_minor, tax_total_minor, rounding_minor, total_minor,
+                            issuer_snapshot, created_by)
+         values ($1, $2, 'INR', true, 0, 'none', $3, 0, $4, 0, $5, $6, $7) returning id`,
+        [rid, target.table, totals.subtotalMinor, totals.taxTotalMinor, totals.totalMinor, issuer, owner]);
+      await admin.query(`insert into bill_orders (bill_id, order_id, restaurant_id) values ($1, $2, $3)`, [bill!.id, orderId, rid]);
+      for (const [index, line] of lines.entries()) {
+        await admin.query(
+          `insert into bill_lines (restaurant_id, bill_id, order_item_id, position, name, quantity, unit_price_minor, line_total_minor)
+           values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [rid, bill!.id, line.id, index + 1, line.name_snapshot, line.quantity, line.unit_price_minor,
+           Number(line.unit_price_minor) * line.quantity]);
+      }
+      for (const [index, tax] of totals.taxes.entries()) {
+        await admin.query(
+          `insert into bill_taxes (restaurant_id, bill_id, position, name, rate_bps, taxable_minor, amount_minor)
+           values ($1, $2, $3, $4, $5, $6, $7)`, [rid, bill!.id, index + 1, tax.name, tax.rateBps, tax.taxableMinor, tax.amountMinor]);
+      }
+      if (billNo !== null) {
+        await admin.query(
+          `insert into bill_counters (restaurant_id, series, next_no) values ($1, 'main', $2)
+           on conflict (restaurant_id, series) do update set next_no = excluded.next_no`, [rid, billNo + 1]);
+        const hash = createHash('sha256').update(canonicalBillText({
+          restaurantId: rid, billNo, billRef: String(billNo), series: 'main', currency: 'INR', pricesIncludeTax: true,
+          issuer, tableNumber: 'T1', orderRefs: [orderId === orderOne!.id ? '1' : '3'],
+          lines: lines.map((l) => ({ name: l.name_snapshot, quantity: l.quantity, unitPriceMinor: Number(l.unit_price_minor),
+                                      lineTotalMinor: Number(l.unit_price_minor) * l.quantity })),
+          taxes: totals.taxes, subtotalMinor: totals.subtotalMinor, discountType: null, discountValue: null,
+          discountMinor: 0, discountReason: null, serviceChargeBps: 0, serviceChargeMinor: 0,
+          taxTotalMinor: totals.taxTotalMinor, roundingMode: 'none', roundingMinor: 0, totalMinor: totals.totalMinor,
+        })).digest();
+        await admin.query(
+          `update bills set status = 'finalized', bill_no = $2, bill_ref = $3, content_hash = $4,
+                  finalized_by = $5, finalized_at = now(), version = version + 1 where id = $1`,
+          [bill!.id, billNo, String(billNo), hash, owner]);
+      }
+      return { id: bill!.id, total: totals.totalMinor };
+    };
+    const paid = await makeBill(orderOne!.id, 1);
+    await admin.query(
+      `insert into payments (restaurant_id, bill_id, method, amount_minor, reference, recorded_by)
+       values ($1, $2, 'cash', $3, $4, $5)`, [rid, paid.id, paid.total, marker, owner]);
+    const unpaid = await makeBill(orderThree!.id, 2);
+    const { rows: [draft] } = await admin.query<{ id: string }>(
+      `insert into bills (restaurant_id, table_id, currency, prices_include_tax, service_charge_bps, rounding_mode,
+                          subtotal_minor, total_minor, issuer_snapshot, created_by)
+       values ($1, $2, 'INR', true, 0, 'none', 0, 0, $3, $4) returning id`, [rid, target.table, issuer, owner]);
+    const { rows: [orderItem] } = await admin.query<{ id: string }>(
+      `select id from order_items where order_id = $1 limit 1`, [target.order]);
+    Object.assign(target, { draftBill: draft!.id, unpaidBill: unpaid.id, unpaidTotal: unpaid.total, orderItem: orderItem!.id });
+  }
+
   // Live restaurants take orders, so a customer insert is refused for the right
   // reason (wrong restaurant) rather than because ordering is paused.
   await admin.query(`update restaurants set accepting_orders = true where id = any($1::uuid[])`, [[restaurantA, restaurantB]]);

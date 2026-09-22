@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router';
 import { formatMoney, ORDER_STATUS_LABEL } from '@dineflow/shared';
 import { Button, Dialog, Field, OrderStatusChip, Skeleton } from '@/components/ui/index.ts';
 import { ApiError } from '@/lib/api.ts';
@@ -17,7 +18,7 @@ const textareaClass = 'block w-full rounded-md border border-border-strong bg-su
  * the server sent them, which it does only for roles allowed to see them.
  */
 export function OrderDetailDialog({ orderId, onClose, onChanged }: Props) {
-  const { state: session } = useSession();
+  const { state: session, may } = useSession();
   const role = session.status === 'signed-in' ? session.session.role : null;
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -128,6 +129,24 @@ export function OrderDetailDialog({ orderId, onClose, onChanged }: Props) {
               <p className="mt-2 rounded-md bg-surface-2 px-3 py-2 text-sm text-text">“{order.specialInstructions}”</p>
             ) : null}
           </section>
+
+          {order.bill !== undefined ? (
+            <section aria-labelledby="order-bill" className="flex flex-wrap items-center gap-2 text-sm">
+              <h3 id="order-bill" className="font-medium text-text">Bill</h3>
+              {order.bill ? (
+                <Link className="text-brand hover:underline" to={`/billing?bill=${order.bill.id}`}>
+                  {order.bill.ref ? `No. ${order.bill.ref}` : 'Draft'} — open
+                </Link>
+              ) : order.status === 'cancelled' ? <span className="text-muted">Not billed.</span> : (
+                <>
+                  <span className="text-muted">Not billed yet.</span>
+                  {may('bill.create') ? (
+                    <Link className="text-brand hover:underline" to={`/billing?table=${order.table.id}&order=${order.id}`}>Create bill</Link>
+                  ) : null}
+                </>
+              )}
+            </section>
+          ) : null}
 
           {order.contact !== undefined ? (
             <section aria-labelledby="order-contact" className="text-sm">

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyBps, formatMoney, MoneyError, parseMoney, roundHalfUp, sumMinor } from './money.ts';
+import { applyBps, formatMoney, minorToDecimal, MoneyError, parseMoney, roundHalfUp, sumMinor } from './money.ts';
 
 test('formats minor units without floating point drift', () => {
   assert.equal(formatMoney(24950, 'INR').replace(/ /g, ' '), '₹249.50');
@@ -31,4 +31,12 @@ test('applies tax rates in basis points', () => {
   assert.equal(applyBps(25000, 500), 1250);        // 5% of 250.00 = 12.50
   assert.equal(applyBps(9999, 1800), 1800);        // 18% of 99.99 = 17.998 -> 18.00
   assert.throws(() => applyBps(100, 10_001), MoneyError);
+});
+
+test('minorToDecimal gives plain decimals for machine-readable output', () => {
+  assert.equal(minorToDecimal(24950, 'INR'), '249.50');
+  assert.equal(minorToDecimal(5, 'INR'), '0.05');
+  assert.equal(minorToDecimal(-40, 'INR'), '-0.40');
+  assert.equal(minorToDecimal(0, 'INR'), '0.00');
+  assert.throws(() => minorToDecimal(1.5, 'INR'), MoneyError);
 });

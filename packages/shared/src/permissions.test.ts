@@ -12,6 +12,7 @@ test('roles get the permissions the PRD gives them', () => {
   assert.ok(can(staff('manager'), 'bill.void'));
   assert.ok(can(staff('kitchen'), 'menu.item.toggleAvailability'));
   assert.ok(can(staff('billing'), 'payment.record'));
+  assert.ok(can(staff('billing'), 'report.sales'));
 });
 
 test('roles are denied what the PRD withholds', () => {
@@ -19,6 +20,8 @@ test('roles are denied what the PRD withholds', () => {
   assert.equal(can(staff('kitchen'), 'order.read.contact'), false, 'kitchen must never see customer contact details');
   assert.equal(can(staff('billing'), 'bill.discount.apply'), false);
   assert.equal(can(staff('billing'), 'bill.void'), false);
+  assert.equal(can(staff('kitchen'), 'report.sales'), false, 'kitchen sees no sales');
+  assert.equal(can(staff('kitchen'), 'bill.read'), false);
   assert.equal(can(staff('manager'), 'restaurant.settings.update'), false);
   assert.equal(can(staff('manager'), 'restaurant.tax.update'), false);
   assert.equal(can(staff('manager'), 'audit.read.all'), false);

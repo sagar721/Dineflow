@@ -13,6 +13,7 @@
   "exports": {
     "./context": "./src/context.ts",
     "./migrate": "./src/migrate.ts",
-    "./schema-guard": "./src/schema-guard.ts"
+    "./schema-guard": "./src/schema-guard.ts",
+    "./billing-ledger": "./src/billing-ledger.ts"
   }
 }

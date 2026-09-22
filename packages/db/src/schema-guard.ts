@@ -47,6 +47,17 @@ export const ALLOWED_DEFINER_FUNCTIONS = new Set([
   'app.check_order_totals',
   // 010: writes the append-only status history; nobody may insert into it directly.
   'app.record_order_status',
+  // 011: bill numbers only for the caller's own restaurant and billing roles; the
+  // check that a finalized bill's number is the one just drawn; and the order
+  // guard's view of whether an order is billed (kitchen may not read bills).
+  'app.next_bill_no',
+  'app.bill_no_is_current',
+  'app.order_bill_state',
+  // 012: the billing ledger is written only by these triggers and by the copy
+  // recorder (own restaurant, billing roles); nobody may insert into it directly.
+  'app.ledger_on_bills',
+  'app.ledger_on_payments',
+  'app.record_bill_copy',
 ]);
 
 /** Roles that must never hold privileges on DineFlow tables (Part 7 §3, F-1/F-7). */

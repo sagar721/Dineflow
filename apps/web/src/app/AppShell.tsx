@@ -14,7 +14,7 @@ const NAV: NavItem[] = [
   { to: '/kitchen', label: 'Kitchen', icon: ChefHat, ready: true },
   { to: '/tables', label: 'Tables & QR', icon: QrCode, ready: true },
   { to: '/menu', label: 'Menu', icon: BookOpen, ready: true },
-  { to: '/billing', label: 'Billing', icon: Receipt },
+  { to: '/billing', label: 'Billing', icon: Receipt, ready: true },
   { to: '/staff', label: 'Staff', icon: Users },
   { to: '/settings', label: 'Settings', icon: Settings },
   { to: '/security', label: 'Account security', icon: ShieldCheck, ready: true },

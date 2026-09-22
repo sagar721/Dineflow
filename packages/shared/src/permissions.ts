@@ -56,6 +56,9 @@ export const PERMISSIONS = {
   'payment.record': ['owner', 'manager', 'billing'],
   'payment.reverse': ['owner', 'manager'],
 
+  // Reports. Billing staff see only the sales they billed themselves (design/02 §6.8).
+  'report.sales': ['owner', 'manager', 'billing'],
+
   // Reporting, audit, export
   'dashboard.read': ['owner', 'manager'],
   'audit.read.all': ['owner'],

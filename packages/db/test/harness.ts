@@ -143,6 +143,38 @@ function insertFor(spec: TableSpec, restaurantId: string, userId: string, acting
     case 'order_status_history':
       return { sql: `insert into order_status_history (restaurant_id, order_id, to_status) values ($1, $2, 'served')`,
                params: [restaurantId, target?.order ?? null] };
+    // Billing probes aim at that restaurant's own empty draft, finalized unpaid bill
+    // and unbilled order, so a refusal comes from the policy, not from a rule.
+    case 'bills':
+      return { sql: `insert into bills (restaurant_id, table_id, currency, prices_include_tax, service_charge_bps,
+                                        rounding_mode, subtotal_minor, total_minor, issuer_snapshot, created_by)
+                     values ($1, $2, 'INR', true, 0, 'none', 0, 0, '{"name": "PROBE"}', $3)`,
+               params: [restaurantId, target?.table ?? null, actingUserId] };
+    case 'bill_orders':
+      return { sql: `insert into bill_orders (bill_id, order_id, restaurant_id) values ($2, $3, $1)`,
+               params: [restaurantId, target?.draftBill ?? null, target?.order ?? null] };
+    case 'bill_lines':
+      return { sql: `insert into bill_lines (restaurant_id, bill_id, order_item_id, position, name, quantity,
+                                             unit_price_minor, line_total_minor)
+                     values ($1, $2, $3, 1, 'PROBE line', 1, 100, 100)`,
+               params: [restaurantId, target?.draftBill ?? null, target?.orderItem ?? null] };
+    case 'bill_taxes':
+      return { sql: `insert into bill_taxes (restaurant_id, bill_id, position, name, rate_bps, taxable_minor, amount_minor)
+                     values ($1, $2, 1, 'PROBE tax', 500, 0, 0)`,
+               params: [restaurantId, target?.draftBill ?? null] };
+    case 'bill_counters':
+      return { sql: `insert into bill_counters (restaurant_id, series, next_no) values ($1, 'probe', 1)`, params: [restaurantId] };
+    case 'payments':
+      return { sql: `insert into payments (restaurant_id, bill_id, method, amount_minor, recorded_by)
+                     values ($1, $2, 'cash', $3, $4)`,
+               params: [restaurantId, target?.unpaidBill ?? null, target?.unpaidTotal ?? 0, actingUserId] };
+    case 'bill_ledger':
+      return { sql: `insert into bill_ledger (restaurant_id, seq, event, bill_id, prev_hash, entry_hash)
+                     values ($1, 999999, 'bill_printed', $2, $3, $3)`,
+               params: [restaurantId, target?.unpaidBill ?? null, Buffer.alloc(32)] };
+    case 'bill_ledger_heads':
+      return { sql: `insert into bill_ledger_heads (restaurant_id, seq, last_hash) values ($1, 0, $2)
+                     on conflict (restaurant_id) do update set seq = 0`, params: [restaurantId, Buffer.alloc(32)] };
     case 'menu_categories':
       return { sql: `insert into menu_categories (restaurant_id, name) values ($1, $2)`,
                params: [restaurantId, `PROBE-${Math.random().toString(36).slice(2, 8)}`] };
@@ -157,7 +189,8 @@ function insertFor(spec: TableSpec, restaurantId: string, userId: string, acting
   }
 }
 
-function updateFor(spec: TableSpec, restaurantId: string): { sql: string; params: unknown[] } {
+function updateFor(spec: TableSpec, restaurantId: string, fx: Fixtures): { sql: string; params: unknown[] } {
+  const target = fx.probeTargets[restaurantId];
   switch (spec.table) {
     case 'restaurants':
       return { sql: `update restaurants set name = name || ' (probe)' where id = $1`, params: [restaurantId] };
@@ -194,6 +227,27 @@ function updateFor(spec: TableSpec, restaurantId: string): { sql: string; params
       return { sql: `update order_items set unit_price_minor = 1 where restaurant_id = $1`, params: [restaurantId] };
     case 'order_customers':
       return { sql: `update order_customers set mobile = '9822222222' where restaurant_id = $1`, params: [restaurantId] };
+    // A draft's version: a change any billing role may make. Finalized bills are
+    // immutable except for voiding (tested in the API suite).
+    case 'bills':
+      return { sql: `update bills set version = version + 1 where id = $1`, params: [target?.draftBill ?? null] };
+    case 'bill_orders':
+      return { sql: `update bill_orders set voided = true where restaurant_id = $1`, params: [restaurantId] };
+    case 'bill_lines':
+      return { sql: `update bill_lines set unit_price_minor = 1, line_total_minor = quantity where restaurant_id = $1`,
+               params: [restaurantId] };
+    case 'bill_taxes':
+      return { sql: `update bill_taxes set amount_minor = 0 where restaurant_id = $1`, params: [restaurantId] };
+    case 'bill_counters':
+      return { sql: `update bill_counters set next_no = next_no + 1 where restaurant_id = $1`, params: [restaurantId] };
+    // A reversal (FR-081): owner and manager only.
+    case 'payments':
+      return { sql: `update payments set reversed_at = now(), reversed_by = app.uid(), reversal_reason = 'PROBE reversal'
+                     where restaurant_id = $1 and reversed_at is null`, params: [restaurantId] };
+    case 'bill_ledger':
+      return { sql: `update bill_ledger set payload = '{"tampered": true}' where restaurant_id = $1`, params: [restaurantId] };
+    case 'bill_ledger_heads':
+      return { sql: `update bill_ledger_heads set seq = seq + 1 where restaurant_id = $1`, params: [restaurantId] };
     case 'menu_categories':
       return { sql: `update menu_categories set sort_order = sort_order + 1 where restaurant_id = $1`,
                params: [restaurantId] };
@@ -204,6 +258,17 @@ function updateFor(spec: TableSpec, restaurantId: string): { sql: string; params
                params: [restaurantId] };
     default:
       throw new Error(`no update probe declared for ${spec.table}`);
+  }
+}
+
+function deleteFor(spec: TableSpec, restaurantId: string, fx: Fixtures): { sql: string; params: unknown[] } {
+  const target = fx.probeTargets[restaurantId];
+  switch (spec.table) {
+    // Discarding a draft (approved decision 7).
+    case 'bills':
+      return { sql: `delete from bills where id = $1`, params: [target?.draftBill ?? null] };
+    default:
+      throw new Error(`no targeted delete probe declared for ${spec.table}`);
   }
 }
 
@@ -298,7 +363,7 @@ export async function runIsolationMatrix(client: pg.Client, fx: Fixtures): Promi
       }
 
       // ---- update own / foreign -------------------------------------------
-      const ownUpd = updateFor(spec, ownTenant ?? (fx.restaurantA as string));
+      const ownUpd = updateFor(spec, ownTenant ?? (fx.restaurantA as string), fx);
       const ownUpdate = await writeProbe(client, principal, fx, ownUpd.sql, ownUpd.params);
       const updateOk = cell.updateOwn === 'allow' ? ownUpdate.allowed : !ownUpdate.allowed;
       checks.push({
@@ -307,7 +372,7 @@ export async function runIsolationMatrix(client: pg.Client, fx: Fixtures): Promi
         detail: updateOk ? undefined : `allowed=${ownUpdate.allowed} ${ownUpdate.error ?? ''}`,
       });
 
-      const foreignUpd = updateFor(spec, foreignTenant);
+      const foreignUpd = updateFor(spec, foreignTenant, fx);
       const foreignUpdate = await writeProbe(client, principal, fx, foreignUpd.sql, foreignUpd.params);
       const foreignUpdateAllowedByDesign = principal.id === 'admin' || principal.id === 'admin-granted'
         ? spec.table === 'restaurants' || spec.table === 'support_grants'
@@ -331,13 +396,34 @@ export async function runIsolationMatrix(client: pg.Client, fx: Fixtures): Promi
         });
       }
 
-      // ---- delete: no principal has DELETE anywhere in this schema ---------
+      // ---- delete: deleting everything is refused everywhere ---------------
+      // (Where a table has rows that may never be deleted — finalized bills — the
+      // statement fails as a whole.)
       const del = await writeProbe(client, principal, fx, `delete from ${spec.table}`, []);
       checks.push({
         name: `delete from ${spec.table} as ${principal.id} (expect deny)`,
         passed: !del.allowed,
         detail: del.allowed ? 'delete succeeded' : undefined,
       });
+
+      // ---- targeted delete, where some delete is legitimate ------------------
+      if (cell.deleteOwn) {
+        const ownDel = deleteFor(spec, ownTenant ?? (fx.restaurantA as string), fx);
+        const ownDelete = await writeProbe(client, principal, fx, ownDel.sql, ownDel.params);
+        const ownDelOk = cell.deleteOwn === 'allow' ? ownDelete.allowed : !ownDelete.allowed;
+        checks.push({
+          name: `targeted delete from ${spec.table} (own tenant) as ${principal.id} (expect ${cell.deleteOwn})`,
+          passed: ownDelOk,
+          detail: ownDelOk ? undefined : `allowed=${ownDelete.allowed} ${ownDelete.error ?? ''}`,
+        });
+        const foreignDel = deleteFor(spec, foreignTenant, fx);
+        const foreignDelete = await writeProbe(client, principal, fx, foreignDel.sql, foreignDel.params);
+        checks.push({
+          name: `targeted delete from ${spec.table} for ANOTHER tenant as ${principal.id} (expect deny)`,
+          passed: !foreignDelete.allowed,
+          detail: foreignDelete.allowed ? 'cross-tenant delete succeeded' : undefined,
+        });
+      }
     }
   }
 

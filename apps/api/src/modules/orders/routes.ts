@@ -149,8 +149,16 @@ export function orderRoutes({ db, verify, cookieSecure }: OrderDeps): Router {
           'select mobile, email from order_customers where order_id = $1 and anonymized_at is null', [id])).rows[0] ?? null
       : undefined;
     const { timezone, currency } = await restaurantInfo(client, principal.restaurantId);
+    // The live bill this order is on, for roles that work with bills. Kitchen does
+    // not: RLS would return nothing for kitchen anyway.
+    const bill = can(principal, 'bill.read')
+      ? (await client.query<{ id: string; status: string; bill_ref: string | null }>(
+          `select b.id, b.status, b.bill_ref from bill_orders bo join bills b on b.id = bo.bill_id
+            where bo.order_id = $1 and not bo.voided`, [id])).rows[0] ?? null
+      : undefined;
     return {
       ...presentSummary(row),
+      ...(bill === undefined ? {} : { bill: bill ? { id: bill.id, status: bill.status, ref: bill.bill_ref } : null }),
       lines: lines.rows.map((line) => ({
         name: line.name_snapshot, quantity: line.quantity, unitPriceMinor: Number(line.unit_price_minor),
         lineTotalMinor: Number(line.line_total_minor), note: line.item_note,
@@ -273,6 +281,10 @@ export function orderRoutes({ db, verify, cookieSecure }: OrderDeps): Router {
     return row;
   };
 
+  /** Which live bill, if any, the order is on: 'finalized', 'draft' or 'none'. */
+  const billState = async (client: pg.PoolClient, id: string) =>
+    (await client.query<{ state: 'finalized' | 'draft' | 'none' }>('select app.order_bill_state($1) as state', [id])).rows[0]!.state;
+
   /** The database guard is the second line: if it refuses, answer as the API would have. */
   const guardRefusal = (error: unknown): never => {
     const code = (error as { code?: string }).code;
@@ -302,6 +314,10 @@ export function orderRoutes({ db, verify, cookieSecure }: OrderDeps): Router {
         if (cancelling && !body.reason) {
           throw badRequest('REASON_REQUIRED', 'Give a reason for cancelling this order.',
             [{ field: 'reason', message: 'Give a reason for cancelling this order.' }]);
+        }
+        // BR-ORD-04: an order on an issued, non-void bill cannot be cancelled.
+        if (cancelling && await billState(client, id) === 'finalized') {
+          throw conflict('ORDER_BILLED', 'This order is on an issued bill. Void the bill first if it must be cancelled.');
         }
         await client.query(`select set_config('app.status_reason', $1, true)`, [cancelling ? body.reason! : '']);
         await client.query(
@@ -333,6 +349,10 @@ export function orderRoutes({ db, verify, cookieSecure }: OrderDeps): Router {
         const to = revertTarget(current.status);
         if (!to || !canRevert(principal.role, current.status)) {
           throw conflict('ILLEGAL_TRANSITION', `An order that is ${current.status} cannot be taken back a step.`);
+        }
+        // BR-ORD-03: served → ready only while the order is on no live bill.
+        if (current.status === 'served' && await billState(client, id) !== 'none') {
+          throw conflict('ORDER_BILLED', 'This order is on a bill. Discard the draft or void the bill first.');
         }
         await client.query(`select set_config('app.status_reason', $1, true)`, [body.reason]);
         await client.query('update orders set status = $2::order_status, version = version + 1 where id = $1', [id, to])

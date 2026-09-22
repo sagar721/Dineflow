@@ -16,6 +16,7 @@
     "test": "npm run test -w @dineflow/shared && npm run test -w @dineflow/web",
     "harness": "npm run harness --workspace @dineflow/db",
     "restore-drill": "node scripts/restore-drill/run.mjs",
+    "verify-billing-ledger": "node scripts/verify-billing-ledger.mjs",
     "dev": "node scripts/dev.mjs",
     "build": "npm run build -w @dineflow/web",
     "test:db": "npm run harness -w @dineflow/db",

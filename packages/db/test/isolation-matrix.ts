@@ -19,6 +19,12 @@ export type Cell = {
   read: ReadExpectation;
   insertOwn: WriteExpectation;
   updateOwn: WriteExpectation;
+  /**
+   * A targeted delete of one of the tenant's own rows, for the few tables where some
+   * delete is legitimate (a draft bill may be discarded, approved decision 7). Left
+   * out, the table is covered only by the blanket "delete everything is refused".
+   */
+  deleteOwn?: WriteExpectation;
 };
 
 export type PrincipalKind =
@@ -71,6 +77,101 @@ export type TableSpec = {
 };
 
 const deny = (read: ReadExpectation): Cell => ({ read, insertOwn: 'deny', updateOwn: 'deny' });
+
+// Billing (migration 011). Owner, manager and billing work on bills; kitchen sees
+// nothing; support access reads only. Which changes are legal (discount caps,
+// finalization, voids, reversals) is the database guards' decision, exercised in
+// the API suite; the probes here are one legitimate change per table.
+const billingCells = (write: { insert: WriteExpectation; update: WriteExpectation },
+                      overrides: Partial<Record<string, Cell>> = {}): Record<string, Cell> => {
+  const staff: Cell = { read: 'own', insertOwn: write.insert, updateOwn: write.update };
+  return {
+    'owner-A':        staff,
+    'manager-A':      staff,
+    'kitchen-A':      deny('none'),
+    'billing-A':      staff,
+    'deactivated-A':  deny('none'),
+    'owner-S':        deny('none'),
+    'owner-B':        staff,
+    'owner-P':        staff,
+    'admin-no-mfa':   deny('none'),
+    'admin':          deny('none'),
+    'admin-granted':  deny('own'),
+    'public-A':       deny('none'),
+    'public-none':    deny('none'),
+    'api-no-context': deny('none'),
+    ...overrides,
+  } as Record<string, Cell>;
+};
+const discardDraft: Cell = { read: 'own', insertOwn: 'allow', updateOwn: 'allow', deleteOwn: 'allow' };
+const noDiscard: Cell = { read: 'none', insertOwn: 'deny', updateOwn: 'deny', deleteOwn: 'deny' };
+
+const BILLING_TABLES: TableSpec[] = [
+  {
+    table: 'bills',
+    tenantColumn: 'restaurant_id',
+    markerColumn: "issuer_snapshot->>'name'",
+    // Any billing role may create a draft, change it and discard it (no number is
+    // consumed). Finalized and void bills can never be deleted.
+    cells: billingCells({ insert: 'allow', update: 'allow' }, {
+      'owner-A': discardDraft, 'manager-A': discardDraft, 'billing-A': discardDraft,
+      'owner-B': discardDraft, 'owner-P': discardDraft,
+      'kitchen-A': noDiscard, 'owner-S': noDiscard, 'admin': noDiscard,
+      'admin-granted': { ...noDiscard, read: 'own' }, 'public-A': noDiscard,
+    }),
+  },
+  {
+    table: 'bill_orders',
+    tenantColumn: 'restaurant_id',
+    markerColumn: "coalesce((select o.special_instructions from orders o where o.id = order_id), '')",
+    // The only update is releasing orders when their bill is voided, which the
+    // void trigger does; a direct update on a live bill is refused.
+    cells: billingCells({ insert: 'allow', update: 'deny' }),
+  },
+  {
+    table: 'bill_lines',
+    tenantColumn: 'restaurant_id',
+    markerColumn: 'name',
+    cells: billingCells({ insert: 'allow', update: 'deny' }),
+  },
+  {
+    table: 'bill_taxes',
+    tenantColumn: 'restaurant_id',
+    markerColumn: 'name',
+    cells: billingCells({ insert: 'allow', update: 'deny' }),
+  },
+  {
+    table: 'bill_counters',
+    tenantColumn: 'restaurant_id',
+    markerColumn: 'next_no::text',
+    // Reached only through app.next_bill_no(); no role holds any privilege on it.
+    cells: billingCells({ insert: 'deny', update: 'deny' }, Object.fromEntries(
+      ['owner-A', 'manager-A', 'billing-A', 'owner-B', 'owner-P', 'admin-granted'].map((id) => [id, deny('none')]))),
+  },
+  {
+    table: 'payments',
+    tenantColumn: 'restaurant_id',
+    markerColumn: "coalesce(reference, '')",
+    // Recording a payment: any billing role. Reversing one: owner and manager only.
+    cells: billingCells({ insert: 'allow', update: 'allow' }, {
+      'billing-A': { read: 'own', insertOwn: 'allow', updateOwn: 'deny' },
+    }),
+  },
+  // The ledger (012): readable by the billing roles and support access; written
+  // only by triggers, append-only, so no principal inserts or edits anything.
+  {
+    table: 'bill_ledger',
+    tenantColumn: 'restaurant_id',
+    markerColumn: "coalesce((select b.issuer_snapshot->>'name' from bills b where b.id = bill_id), '')",
+    cells: billingCells({ insert: 'deny', update: 'deny' }),
+  },
+  {
+    table: 'bill_ledger_heads',
+    tenantColumn: 'restaurant_id',
+    markerColumn: "coalesce((select r.name from restaurants r where r.id = restaurant_id), '')",
+    cells: billingCells({ insert: 'deny', update: 'deny' }),
+  },
+];
 
 export const TABLES: TableSpec[] = [
   {
@@ -488,4 +589,5 @@ export const TABLES: TableSpec[] = [
       'api-no-context': deny('none'),
     },
   },
+  ...BILLING_TABLES,
 ];
