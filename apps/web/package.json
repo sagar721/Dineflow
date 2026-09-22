@@ -9,8 +9,9 @@
     "preview": "vite preview",
     "smoke": "VITE_ALLOW_DEMO_DATA=1 vite build --ssr src/smoke.tsx --outDir dist-ssr --logLevel warn && node dist-ssr/smoke.js",
     "contrast": "node scripts/contrast-check.mjs",
-    "test": "node scripts/contrast-check.mjs && npm run smoke && npm run build && npm run bundle-check",
-    "bundle-check": "node scripts/bundle-secrets-check.mjs"
+    "test": "npm run unit && node scripts/contrast-check.mjs && npm run smoke && npm run build && npm run bundle-check",
+    "bundle-check": "node scripts/bundle-secrets-check.mjs",
+    "unit": "node --test src/features/order/cart.test.ts"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",

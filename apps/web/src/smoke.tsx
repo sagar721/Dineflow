@@ -9,6 +9,9 @@ import { OnboardingPage } from '@/features/onboarding/OnboardingPage.tsx';
 import { TablesPage } from '@/features/tables/TablesPage.tsx';
 import { QrSheetPage } from '@/features/tables/QrSheetPage.tsx';
 import { MenuPage } from '@/features/menu/MenuPage.tsx';
+import { OrderStatusPage } from '@/features/order/OrderStatusPage.tsx';
+import { CustomerMenu } from '@/features/order/CustomerMenu.tsx';
+import type { PublicMenu } from '@/features/order/api.ts';
 import { TableEntryPage } from '@/features/public/TableEntryPage.tsx';
 import { SecurityPage } from '@/features/auth/SecurityPage.tsx';
 import { ResetPasswordPage } from '@/features/auth/ResetPasswordPage.tsx';
@@ -17,14 +20,14 @@ import { DashboardPage } from '@/features/dashboard/DashboardPage.tsx';
 import { DesignPage } from '@/features/design/DesignPage.tsx';
 import { NotFoundPage } from '@/app/NotFoundPage.tsx';
 
-const routes = ['/', '/design', '/orders', '/login', '/accept-invite', '/setup', '/tables', '/menu', '/t/sample-token', '/security', '/reset-password', '/tables/qr-sheet'];
+const routes = ['/', '/design', '/orders', '/login', '/accept-invite', '/setup', '/tables', '/menu', '/t/sample-token', '/security', '/reset-password', '/tables/qr-sheet', '/o/sample-status-token'];
 let failures = 0;
 
 for (const route of routes) {
   try {
     // Rendered without the app shell (the QR sheet is printed bare), so no skip link.
     const signedOut = route === '/login' || route === '/accept-invite' || route.startsWith('/t/')
-      || route === '/reset-password' || route === '/tables/qr-sheet';
+      || route === '/reset-password' || route === '/tables/qr-sheet' || route.startsWith('/o/');
     const html = renderToString(
       <MemoryRouter initialEntries={[route]}>
         <SessionProvider>
@@ -35,6 +38,7 @@ for (const route of routes) {
               <Route path="/t/:token" element={<TableEntryPage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route path="/tables/qr-sheet" element={<QrSheetPage />} />
+              <Route path="/o/:statusToken" element={<OrderStatusPage />} />
             </Routes>
           ) : (
             <AppShell>
@@ -56,7 +60,7 @@ for (const route of routes) {
     const checks: [string, boolean][] = [
       // The customer's loading screen is deliberately minimal on a phone, so it gets
       // a lower floor; every other screen must render substantial markup.
-      ['renders markup', html.length > (route.startsWith('/t/') ? 200 : 500)],
+      ['renders markup', html.length > (route.startsWith('/t/') || route.startsWith('/o/') ? 200 : 500)],
       ['has a skip link', signedOut || html.includes('Skip to main content')],
       ['has one h1', (html.match(/<h1/g) ?? []).length === 1],
       ['no unresolved React placeholders', !html.includes('[object Object]')],
@@ -134,6 +138,43 @@ for (const route of routes) {
   } catch (error) {
     failures += 1;
     console.log(`  FAIL ${route} — threw: ${(error as Error).message}`);
+  }
+}
+
+// The customer menu rendered with fixed data: the add controls must follow
+// availability, the cart and the restaurant's ordering switch.
+{
+  const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  const menu: PublicMenu = {
+    restaurant: { name: 'Smoke Cafe', brandColor: null, acceptingOrders: true, currency: 'INR' },
+    table: { tableNumber: '7', name: null },
+    ordering: { contactPolicy: 'optional', maxQtyPerLine: 20, maxItemsPerOrder: 60 },
+    categories: [{ id: id(10), name: 'Snacks', items: [
+      { id: id(1), name: 'Samosa', description: null, priceMinor: 2500, imageUrl: null, diet: 'veg', available: true },
+      { id: id(2), name: 'Chicken Roll', description: 'Spicy', priceMinor: 12000, imageUrl: null, diet: 'non_veg', available: true },
+      { id: id(3), name: 'Idli', description: null, priceMinor: 6000, imageUrl: null, diet: 'veg', available: false },
+    ] }],
+  };
+  const noop = () => undefined;
+  const render = (m: PublicMenu, lines: { menuItemId: string; quantity: number; note: string }[]) => renderToString(
+    <MemoryRouter><CustomerMenu menu={m} cart={{ lines, idempotencyKey: null }} onAdd={noop} onSetQuantity={noop} /></MemoryRouter>);
+  const html = render(menu, [{ menuItemId: id(2), quantity: 3, note: '' }]);
+  const paused = render({ ...menu, restaurant: { ...menu.restaurant, acceptingOrders: false } }, []);
+  // React separates adjacent text with <!-- --> in server markup.
+  const addButtonFor = (name: string) => new RegExp(`Add<span class="sr-only"> (<!-- -->)?${name}<`);
+  const checks: [string, boolean][] = [
+    ['has one h1', (html.match(/<h1/g) ?? []).length === 1],
+    ['an available item can be added', addButtonFor('Samosa').test(html)],
+    ['an item in the cart shows its quantity controls', html.includes('Chicken Roll quantity') && />3</.test(html)],
+    ['a sold-out item is marked and cannot be added', html.includes('Sold out') && addButtonFor('Samosa').test(html)
+      && !addButtonFor('Idli').test(html)],
+    ['prices are formatted from minor units', html.includes('₹25.00') && html.includes('₹120.00')],
+    ['veg and non-veg are labelled', html.includes('aria-label="Vegetarian"') && html.includes('aria-label="Non-vegetarian"')],
+    ['a paused restaurant offers no add buttons', !paused.includes('Add<span') && paused.includes('not taking orders')],
+  ];
+  for (const [name, ok] of checks) {
+    if (!ok) failures += 1;
+    console.log(`  ${ok ? 'ok  ' : 'FAIL'} customer menu — ${name}`);
   }
 }
 

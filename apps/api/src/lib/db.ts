@@ -65,6 +65,22 @@ export class Database {
   }
 
   /**
+   * Runs `body` as an anonymous customer holding one order-status token. RLS then
+   * shows exactly that order and its lines; nothing else of any restaurant.
+   */
+  async asOrderViewer<T>(tokenHash: Buffer, body: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+    const client = await this.#pool.connect();
+    try {
+      return await withPublicTx(client, null, async () => {
+        await client.query(`select set_config('app.public_order_token_hash', $1, true)`, [tokenHash.toString('hex')]);
+        return body(client);
+      });
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Resolves a QR's random id to its table, only when the token, table and
    * restaurant are all live. Call it only after the token's MAC has verified.
    */

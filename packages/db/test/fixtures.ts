@@ -4,7 +4,7 @@
 // right number of rows" but "no marker belonging to another tenant appears
 // anywhere in the result", which catches leaks that a count-based assertion misses.
 import pg from 'pg';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 export const MARKER = {
   A: 'MARKER-TENANT-A',
@@ -22,6 +22,12 @@ export type Fixtures = {
   adminPlain: string; adminGranted: string;
   /** An auth user with no membership anywhere, so insert probes do not collide. */
   spareUser: string;
+  /**
+   * Per restaurant: rows insert probes can aim at. Customers cannot look these up
+   * themselves (they reach tables only through a QR), so the probe is given them.
+   * `order` has no contact row, so a contact insert probe does not collide.
+   */
+  probeTargets: Record<string, { table: string; menuItem: string; order: string }>;
   grantIdA: string;
 };
 
@@ -29,6 +35,7 @@ export type Fixtures = {
 export async function seed(admin: pg.Client): Promise<Fixtures> {
   await admin.query(`
     truncate audit_log, invitations, auth_lockouts, support_grants, restaurant_users,
+             order_customers, order_items, orders, order_counters,
              menu_items, menu_categories,
              table_qr_tokens, dining_tables, tax_components, restaurant_settings,
              platform_admins, restaurants restart identity cascade;
@@ -124,15 +131,49 @@ export async function seed(admin: pg.Client): Promise<Fixtures> {
 
   // One shown category with one shown item per restaurant, carrying the marker, so
   // both staff and customer probes have a menu row that could leak.
+  const probeTargets: Fixtures['probeTargets'] = {};
   for (const [rid, marker] of [[restaurantA, MARKER.A], [restaurantB, MARKER.B],
                                [restaurantS, MARKER.S], [restaurantP, MARKER.P]] as const) {
     const { rows: cat } = await admin.query<{ id: string }>(
       `insert into menu_categories (restaurant_id, name, sort_order) values ($1, $2, 1) returning id`,
       [rid, `${marker} Starters`]);
-    await admin.query(
+    const { rows: item } = await admin.query<{ id: string }>(
       `insert into menu_items (restaurant_id, category_id, name, price_minor, diet)
-       values ($1, $2, $3, 24900, 'veg')`, [rid, cat[0]!.id, `${marker} Paneer Tikka`]);
+       values ($1, $2, $3, 24900, 'veg') returning id`, [rid, cat[0]!.id, `${marker} Paneer Tikka`]);
+    // Not on any order, so an order-line insert probe does not hit the one-line-per-item rule.
+    const { rows: spare } = await admin.query<{ id: string }>(
+      `insert into menu_items (restaurant_id, category_id, name, price_minor, diet)
+       values ($1, $2, $3, 3000, 'veg') returning id`, [rid, cat[0]!.id, `${marker} Masala Chai`]);
+
+    // Two placed orders per restaurant, written in one transaction each because the
+    // order-total check runs at commit. The first has contact details.
+    const { rows: table } = await admin.query<{ id: string }>(
+      `select id from dining_tables where restaurant_id = $1 and table_number = 'T1'`, [rid]);
+    const orderIds: string[] = [];
+    for (const [no, withContact] of [[1, true], [2, false]] as const) {
+      await admin.query('begin');
+      const { rows: order } = await admin.query<{ id: string }>(
+        `insert into orders (restaurant_id, table_id, order_no, order_ref, subtotal_minor, special_instructions,
+                             public_token_hash, idempotency_key, request_hash)
+         values ($1, $2, $3, $4, 49800, $5, $6, gen_random_uuid(), $7) returning id`,
+        [rid, table[0]!.id, no, String(no), marker, randomBytes(32), randomBytes(32)]);
+      await admin.query(
+        `insert into order_items (restaurant_id, order_id, menu_item_id, position, name_snapshot, unit_price_minor, quantity)
+         values ($1, $2, $3, 1, $4, 24900, 2)`, [rid, order[0]!.id, item[0]!.id, `${marker} Paneer Tikka`]);
+      if (withContact) {
+        await admin.query(
+          `insert into order_customers (order_id, restaurant_id, mobile, email) values ($1, $2, '9800000000', $3)`,
+          [order[0]!.id, rid, `${marker.toLowerCase()}@example.test`]);
+      }
+      await admin.query('commit');
+      orderIds.push(order[0]!.id);
+    }
+    await admin.query(`insert into order_counters (restaurant_id, next_no) values ($1, 3)`, [rid]);
+    probeTargets[rid] = { table: table[0]!.id, menuItem: spare[0]!.id, order: orderIds[1]! };
   }
+  // Live restaurants take orders, so a customer insert is refused for the right
+  // reason (wrong restaurant) rather than because ordering is paused.
+  await admin.query(`update restaurants set accepting_orders = true where id = any($1::uuid[])`, [[restaurantA, restaurantB]]);
 
   // A pending invitation per restaurant, so isolation probes have something to leak.
   for (const [rid, inviter, marker] of [
@@ -159,6 +200,6 @@ export async function seed(admin: pg.Client): Promise<Fixtures> {
   return {
     restaurantA, restaurantB, restaurantS, restaurantP,
     ownerA, managerA, kitchenA, billingA, deactivatedA, ownerB, ownerS, ownerP,
-    adminPlain, adminGranted, spareUser, grantIdA: grant[0]!.id,
+    adminPlain, adminGranted, spareUser, grantIdA: grant[0]!.id, probeTargets,
   };
 }

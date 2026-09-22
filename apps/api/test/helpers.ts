@@ -17,6 +17,7 @@ import { MemoryRateLimiter } from '../src/lib/rate-limit.ts';
 import { Database } from '../src/lib/db.ts';
 import { migrate } from '@dineflow/db/migrate';
 import type { ImageStore } from '../src/lib/image-store.ts';
+import type { OrderLimits } from '../src/modules/public/routes.ts';
 import { seed, type Fixtures } from '../../../packages/db/test/fixtures.ts';
 
 export const OWNER_URL = process.env.DATABASE_URL
@@ -275,6 +276,8 @@ export type TestOptions = {
   sendInvitationEmail?: (to: string, link: string) => Promise<void>;
   /** Menu image storage; defaults to none, which is how an unconfigured bucket behaves. */
   imageStore?: ImageStore | null;
+  /** Order-placement rate limits; tests that place many orders raise them. */
+  orderLimits?: OrderLimits;
 };
 
 /** Boots the real app against a freshly seeded database and a stub provider. */
@@ -350,6 +353,7 @@ export function bootApp(
     logger: silentLogger(),
     sendInvitationEmail: options.sendInvitationEmail,
     imageStore: options.imageStore ?? null,
+    orderLimits: options.orderLimits,
   });
 }
 

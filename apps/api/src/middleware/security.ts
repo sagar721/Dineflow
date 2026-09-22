@@ -32,7 +32,7 @@ export function cors(allowedOrigin: string) {
       res.setHeader('access-control-allow-credentials', 'true');
       res.setHeader('vary', 'Origin');
       res.setHeader('access-control-allow-methods', 'GET,POST,PATCH,DELETE,OPTIONS');
-      res.setHeader('access-control-allow-headers', 'content-type,x-dineflow-client');
+      res.setHeader('access-control-allow-headers', 'content-type,x-dineflow-client,idempotency-key');
       res.setHeader('access-control-max-age', '600');
     }
     if (req.method === 'OPTIONS') {

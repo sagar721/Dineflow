@@ -14,7 +14,7 @@ import { staffRoutes } from './modules/staff/routes.ts';
 import { platformRoutes } from './modules/platform/routes.ts';
 import { restaurantRoutes } from './modules/restaurant/routes.ts';
 import { tableRoutes } from './modules/tables/routes.ts';
-import { publicRoutes, type PublicMenu } from './modules/public/routes.ts';
+import { publicRoutes, type OrderLimits, type PublicMenu } from './modules/public/routes.ts';
 import { menuRoutes } from './modules/menu/routes.ts';
 import { SupabaseImageStore, type ImageStore } from './lib/image-store.ts';
 import { MenuCache } from './lib/menu-cache.ts';
@@ -33,6 +33,8 @@ export type AppDeps = {
   revealInvitationLink?: boolean;
   /** Where menu images go. Defaults to Supabase Storage when MENU_IMAGE_BUCKET is set. */
   imageStore?: ImageStore | null;
+  /** Order-placement rate limits; defaults to the design's values. */
+  orderLimits?: OrderLimits;
 };
 
 export type BuiltApp = { app: Express; db: Database; logger: Logger };
@@ -117,7 +119,7 @@ export function buildApp(deps: AppDeps): BuiltApp {
   app.use('/api/v1/restaurant/menu', menuRoutes({
     db, verify, cookieSecure: config.COOKIE_SECURE, logger, imageStore, menuCache,
   }));
-  app.use('/api/v1/public', publicRoutes({ db, limiter, qrKeys, imageStore, menuCache }));
+  app.use('/api/v1/public', publicRoutes({ db, limiter, qrKeys, imageStore, menuCache, orderLimits: deps.orderLimits }));
   app.use('/api/v1/restaurant', restaurantRoutes({
     db, verify, cookieSecure: config.COOKIE_SECURE,
   }));

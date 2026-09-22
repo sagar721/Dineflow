@@ -97,7 +97,7 @@ Verified **locally only**: API tests against a real Postgres with RLS, the tenan
 
 ## Known limitations
 
-- **Ordering is the next module.** The public menu marks sold-out items and has no cart yet. Refusing a sold-out item at order time will be done by the server's order validation (FR-037), in the ordering module.
+- **Ordering** is now built in [module 5](05-ordering.md). The server refuses sold-out, hidden and archived items when an order is placed (FR-037), not only on the menu.
 - **Historical snapshots** (an order keeping the name and price it was placed at) come with the orders table. Until then, "archived, never deleted" is what protects history.
 - Item order within a category follows creation order. There are no move-up/down controls for items yet; category order is fully editable.
 - Unreferenced photo files can remain if the server stops between storing a file and saving the row. They are harmless (random names) and can be swept by prefix later.

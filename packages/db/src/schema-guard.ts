@@ -40,6 +40,11 @@ export const ALLOWED_DEFINER_FUNCTIONS = new Set([
   'app.list_restaurants',
   'app.set_restaurant_status',
   'app.resolve_table_qr',
+  // 009: numbers orders only for the restaurant the customer's QR resolved to (no
+  // argument to abuse); verifies order totals at commit, which the inserting
+  // customer role cannot read back itself.
+  'app.next_order_no',
+  'app.check_order_totals',
 ]);
 
 /** Roles that must never hold privileges on DineFlow tables (Part 7 §3, F-1/F-7). */

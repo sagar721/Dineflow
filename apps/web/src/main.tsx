@@ -13,6 +13,7 @@ import { OnboardingPage } from '@/features/onboarding/OnboardingPage.tsx';
 import { TablesPage } from '@/features/tables/TablesPage.tsx';
 import { QrSheetPage } from '@/features/tables/QrSheetPage.tsx';
 import { MenuPage } from '@/features/menu/MenuPage.tsx';
+import { OrderStatusPage } from '@/features/order/OrderStatusPage.tsx';
 import { TableEntryPage } from '@/features/public/TableEntryPage.tsx';
 import { SecurityPage } from '@/features/auth/SecurityPage.tsx';
 import { ResetPasswordPage } from '@/features/auth/ResetPasswordPage.tsx';
@@ -34,6 +35,8 @@ createRoot(root).render(
           {/* What a customer's phone opens after scanning a table's QR code. No
               session, no app shell: a customer is not a member of staff. */}
           <Route path="/t/:token" element={<TableEntryPage />} />
+          {/* A customer's order, by its unguessable status link (FR-042). */}
+          <Route path="/o/:statusToken" element={<OrderStatusPage />} />
           {/* Outside the shell so that printing gives only the cards. */}
           <Route
             path="/tables/qr-sheet"

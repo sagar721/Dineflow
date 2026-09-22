@@ -71,7 +71,8 @@ async function writeProbe(client: pg.Client, principal: Principal, fx: Fixtures,
 }
 
 /** SQL that inserts one row of `spec` belonging to `restaurantId`. */
-function insertFor(spec: TableSpec, restaurantId: string, userId: string, actingUserId: string): { sql: string; params: unknown[] } {
+function insertFor(spec: TableSpec, restaurantId: string, userId: string, actingUserId: string, fx: Fixtures): { sql: string; params: unknown[] } {
+  const target = fx.probeTargets[restaurantId];
   switch (spec.table) {
     case 'restaurants':
       return { sql: `insert into restaurants (slug, name) values ($1, $2)`,
@@ -121,6 +122,24 @@ function insertFor(spec: TableSpec, restaurantId: string, userId: string, acting
       return { sql: `insert into tax_components (restaurant_id, name, rate_bps)
                      values ($1, 'PROBE-${Math.random().toString(36).slice(2, 8)}', 500)`,
                params: [restaurantId] };
+    // Order probes name the restaurant's own table, item and order directly: a
+    // customer cannot look them up, and must still be refused for a foreign tenant.
+    case 'order_counters':
+      return { sql: `insert into order_counters (restaurant_id, next_no) values ($1, 1)`, params: [restaurantId] };
+    case 'orders':
+      return { sql: `insert into orders (restaurant_id, table_id, order_no, order_ref, subtotal_minor,
+                                         public_token_hash, idempotency_key, request_hash)
+                     values ($1, $2, 900000, 'PROBE', 100,
+                             decode(md5(random()::text) || md5(random()::text), 'hex'), gen_random_uuid(),
+                             decode(md5(random()::text) || md5(random()::text), 'hex'))`,
+               params: [restaurantId, target?.table ?? null] };
+    case 'order_items':
+      return { sql: `insert into order_items (restaurant_id, order_id, menu_item_id, position, name_snapshot, unit_price_minor, quantity)
+                     values ($1, $2, $3, 150, 'PROBE', 100, 1)`,
+               params: [restaurantId, target?.order ?? null, target?.menuItem ?? null] };
+    case 'order_customers':
+      return { sql: `insert into order_customers (order_id, restaurant_id, mobile) values ($1, $2, '9811111111')`,
+               params: [target?.order ?? null, restaurantId] };
     case 'menu_categories':
       return { sql: `insert into menu_categories (restaurant_id, name) values ($1, $2)`,
                params: [restaurantId, `PROBE-${Math.random().toString(36).slice(2, 8)}`] };
@@ -160,6 +179,14 @@ function updateFor(spec: TableSpec, restaurantId: string): { sql: string; params
       return { sql: `update restaurant_settings set bill_footer = 'probe' where restaurant_id = $1`, params: [restaurantId] };
     case 'tax_components':
       return { sql: `update tax_components set rate_bps = 999 where restaurant_id = $1`, params: [restaurantId] };
+    case 'order_counters':
+      return { sql: `update order_counters set next_no = next_no + 1 where restaurant_id = $1`, params: [restaurantId] };
+    case 'orders':
+      return { sql: `update orders set subtotal_minor = subtotal_minor + 1 where restaurant_id = $1`, params: [restaurantId] };
+    case 'order_items':
+      return { sql: `update order_items set unit_price_minor = 1 where restaurant_id = $1`, params: [restaurantId] };
+    case 'order_customers':
+      return { sql: `update order_customers set mobile = '9822222222' where restaurant_id = $1`, params: [restaurantId] };
     case 'menu_categories':
       return { sql: `update menu_categories set sort_order = sort_order + 1 where restaurant_id = $1`,
                params: [restaurantId] };
@@ -237,7 +264,7 @@ export async function runIsolationMatrix(client: pg.Client, fx: Fixtures): Promi
 
       // ---- insert into own tenant -----------------------------------------
       const actingUser = principal.how.kind === 'staff' ? (fx[principal.how.userOf] as string) : (fx.adminPlain as string);
-      const ownIns = insertFor(spec, ownTenant ?? (fx.restaurantA as string), fx.spareUser as string, actingUser);
+      const ownIns = insertFor(spec, ownTenant ?? (fx.restaurantA as string), fx.spareUser as string, actingUser, fx);
       const ownInsert = await writeProbe(client, principal, fx, ownIns.sql, ownIns.params);
       const insertOk = cell.insertOwn === 'allow' ? ownInsert.allowed : !ownInsert.allowed;
       checks.push({
@@ -249,7 +276,7 @@ export async function runIsolationMatrix(client: pg.Client, fx: Fixtures): Promi
       // ---- insert into ANOTHER tenant: always forbidden --------------------
       const foreignTenant = ownTenant === fx.restaurantB ? (fx.restaurantA as string) : (fx.restaurantB as string);
       if (spec.table !== 'restaurants' && spec.table !== 'platform_admins') {
-        const foreignIns = insertFor(spec, foreignTenant, fx.spareUser as string, actingUser);
+        const foreignIns = insertFor(spec, foreignTenant, fx.spareUser as string, actingUser, fx);
         const foreignInsert = await writeProbe(client, principal, fx, foreignIns.sql, foreignIns.params);
         // Platform admins are not tenant-scoped: they open support grants and record
         // their own platform actions against any restaurant, both of which are audited.

@@ -22,7 +22,7 @@ export class ApiError extends Error {
   }
 }
 
-type RequestOptions = { method?: string; body?: unknown; signal?: AbortSignal };
+type RequestOptions = { method?: string; body?: unknown; signal?: AbortSignal; headers?: Record<string, string> };
 
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
   let response: Response;
@@ -31,6 +31,7 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
       method: options.method ?? 'GET',
       credentials: 'include',
       headers: {
+        ...options.headers,
         'content-type': 'application/json',
         'x-dineflow-client': 'web',
       },
