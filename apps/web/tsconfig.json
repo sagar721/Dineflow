@@ -20,5 +20,5 @@
       "@dineflow/shared": ["../../packages/shared/src/index.ts"]
     }
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "vite.config.ts", "vercel.ts", "vercel.test.ts"]
 }

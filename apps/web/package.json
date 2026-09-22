@@ -11,7 +11,7 @@
     "contrast": "node scripts/contrast-check.mjs",
     "test": "npm run unit && node scripts/contrast-check.mjs && npm run smoke && npm run build && npm run bundle-check",
     "bundle-check": "node scripts/bundle-secrets-check.mjs",
-    "unit": "node --test src/features/order/cart.test.ts src/features/orders/board.test.ts src/features/billing/logic.test.ts"
+    "unit": "node --test src/features/order/cart.test.ts src/features/orders/board.test.ts src/features/billing/logic.test.ts vercel.test.ts"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
