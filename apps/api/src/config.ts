@@ -72,6 +72,16 @@ const schema = z.object({
     .default('false')
     .transform((value) => value === 'true'),
 
+  /**
+   * Supabase Storage bucket for menu images (public-read; the API is the only
+   * writer, using the service key). Unset means image upload is switched off:
+   * the rest of the menu works, and uploads answer 503 until a bucket exists.
+   */
+  MENU_IMAGE_BUCKET: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.string().regex(/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/, 'must be a lowercase bucket name').optional(),
+  ),
+
   // 'silent' is included for tests, which assert on behaviour rather than logs.
   LOG_LEVEL: z.enum(['silent', 'fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 }).superRefine((config, ctx) => {

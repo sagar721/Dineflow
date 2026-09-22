@@ -1,10 +1,14 @@
+import { useState } from 'react';
 import { Download, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/index.ts';
+import { ApiError, saveBlob } from '@/lib/api.ts';
+import { fileSafe, tablesApi } from './api.ts';
 
 export type QrPayload = { url: string; svg: string; issuedAt: string; provisional: boolean };
 
 type QrCardProps = {
   qr: QrPayload;
+  tableId: string;
   restaurantName: string;
   tableNumber: string;
   tableName: string | null;
@@ -18,18 +22,27 @@ type QrCardProps = {
  * injected as markup — the design forbids raw HTML injection, and an <img> cannot
  * run script whatever the response contains.
  */
-export function QrCard({ qr, restaurantName, tableNumber, tableName }: QrCardProps) {
+export function QrCard({ qr, tableId, restaurantName, tableNumber, tableName }: QrCardProps) {
   const imageSrc = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(qr.svg)}`;
-  const fileName = `table-${tableNumber.replace(/[^A-Za-z0-9-]+/g, '-')}-qr.svg`;
+  const baseName = `table-${fileSafe(tableNumber)}-qr`;
+  const [pngBusy, setPngBusy] = useState(false);
+  const [pngError, setPngError] = useState<string | null>(null);
 
-  function download() {
-    const blob = new Blob([qr.svg], { type: 'image/svg+xml' });
-    const href = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = href;
-    link.download = fileName;
-    link.click();
-    URL.revokeObjectURL(href);
+  function downloadSvg() {
+    saveBlob(new Blob([qr.svg], { type: 'image/svg+xml' }), `${baseName}.svg`);
+  }
+
+  // The PNG is drawn by the API at print resolution, from the same link as the SVG.
+  async function downloadPng() {
+    setPngBusy(true);
+    setPngError(null);
+    try {
+      saveBlob(await tablesApi.qrPng(tableId), `${baseName}.png`);
+    } catch (caught) {
+      setPngError(caught instanceof ApiError ? caught.message : 'Could not download the PNG.');
+    } finally {
+      setPngBusy(false);
+    }
   }
 
   return (
@@ -70,16 +83,29 @@ export function QrCard({ qr, restaurantName, tableNumber, tableName }: QrCardPro
         </p>
       ) : null}
 
+      {pngError ? (
+        <p role="alert" className="rounded-md bg-danger-bg px-3 py-2 text-sm font-medium text-danger no-print">{pngError}</p>
+      ) : null}
+
       <div className="flex flex-wrap justify-center gap-2 no-print">
         {/* Download is withheld too: a downloaded SVG carries no watermark and could
             be printed anyway, which would defeat the point of the gate. */}
         <Button
           iconLeft={<Download className="size-4" />}
-          onClick={download}
+          onClick={downloadSvg}
           disabled={qr.provisional}
           title={qr.provisional ? 'Downloading is off until the web address is final' : undefined}
         >
           Download SVG
+        </Button>
+        <Button
+          iconLeft={<Download className="size-4" />}
+          onClick={downloadPng}
+          loading={pngBusy}
+          disabled={qr.provisional}
+          title={qr.provisional ? 'Downloading is off until the web address is final' : undefined}
+        >
+          Download PNG
         </Button>
         <Button
           iconLeft={<Printer className="size-4" />}

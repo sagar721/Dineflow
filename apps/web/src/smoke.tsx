@@ -7,6 +7,8 @@ import { LoginPage } from '@/features/auth/LoginPage.tsx';
 import { AcceptInvitePage } from '@/features/auth/AcceptInvitePage.tsx';
 import { OnboardingPage } from '@/features/onboarding/OnboardingPage.tsx';
 import { TablesPage } from '@/features/tables/TablesPage.tsx';
+import { QrSheetPage } from '@/features/tables/QrSheetPage.tsx';
+import { MenuPage } from '@/features/menu/MenuPage.tsx';
 import { TableEntryPage } from '@/features/public/TableEntryPage.tsx';
 import { SecurityPage } from '@/features/auth/SecurityPage.tsx';
 import { ResetPasswordPage } from '@/features/auth/ResetPasswordPage.tsx';
@@ -15,12 +17,14 @@ import { DashboardPage } from '@/features/dashboard/DashboardPage.tsx';
 import { DesignPage } from '@/features/design/DesignPage.tsx';
 import { NotFoundPage } from '@/app/NotFoundPage.tsx';
 
-const routes = ['/', '/design', '/orders', '/login', '/accept-invite', '/setup', '/tables', '/t/sample-token', '/security', '/reset-password'];
+const routes = ['/', '/design', '/orders', '/login', '/accept-invite', '/setup', '/tables', '/menu', '/t/sample-token', '/security', '/reset-password', '/tables/qr-sheet'];
 let failures = 0;
 
 for (const route of routes) {
   try {
-    const signedOut = route === '/login' || route === '/accept-invite' || route.startsWith('/t/') || route === '/reset-password';
+    // Rendered without the app shell (the QR sheet is printed bare), so no skip link.
+    const signedOut = route === '/login' || route === '/accept-invite' || route.startsWith('/t/')
+      || route === '/reset-password' || route === '/tables/qr-sheet';
     const html = renderToString(
       <MemoryRouter initialEntries={[route]}>
         <SessionProvider>
@@ -30,6 +34,7 @@ for (const route of routes) {
               <Route path="/accept-invite" element={<AcceptInvitePage />} />
               <Route path="/t/:token" element={<TableEntryPage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
+              <Route path="/tables/qr-sheet" element={<QrSheetPage />} />
             </Routes>
           ) : (
             <AppShell>
@@ -38,6 +43,7 @@ for (const route of routes) {
                 <Route path="/design" element={<DesignPage />} />
                 <Route path="/setup" element={<OnboardingPage />} />
                 <Route path="/tables" element={<TablesPage />} />
+                <Route path="/menu" element={<MenuPage />} />
                 <Route path="/security" element={<SecurityPage />} />
                 <Route path="*" element={<NotFoundPage />} />
               </Routes>
@@ -76,6 +82,14 @@ for (const route of routes) {
       checks.push(['security page has its heading while loading', html.includes('Account security')]);
       checks.push(['security page shows a busy state', html.includes('aria-busy')]);
       checks.push(['no authenticator key in the initial markup', !/[A-Z2-7]{32}/.test(html)]);
+    }
+    if (route === '/menu') {
+      checks.push(['menu editor shows a busy state while loading', html.includes('aria-busy')]);
+      checks.push(['menu editor has its heading', html.includes('>Menu<')]);
+    }
+    if (route === '/tables/qr-sheet') {
+      checks.push(['QR sheet shows a busy state while loading', html.includes('aria-busy')]);
+      checks.push(['QR sheet print is off until codes load', /<button[^>]*disabled[^>]*>.*?Print sheet/s.test(html)]);
     }
     if (route === '/reset-password') {
       checks.push(['reset page asks for an email when opened without a link', html.includes('type="email"')]);

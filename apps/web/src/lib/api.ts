@@ -61,3 +61,35 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   }
   return payload as T;
 }
+
+/**
+ * A file from the API, such as a QR code image. Same credentials, CSRF header and
+ * error handling as apiFetch, but the successful body is returned as a Blob.
+ */
+export async function apiFetchBlob(path: string): Promise<Blob> {
+  let response: Response;
+  try {
+    response = await fetch(`${BASE}/api/v1${path}`, {
+      credentials: 'include',
+      headers: { 'x-dineflow-client': 'web' },
+    });
+  } catch {
+    throw new ApiError(0, 'NETWORK', "Can't reach the DineFlow server. Check your connection, or try again in a moment.");
+  }
+  if (!response.ok) {
+    const error = (await response.json().catch(() => null))?.error ?? {};
+    throw new ApiError(response.status, error.code ?? 'UNKNOWN',
+      error.message ?? 'Something went wrong. Please try again.', error.requestId);
+  }
+  return response.blob();
+}
+
+/** Hands a Blob to the browser as a download with the given file name. */
+export function saveBlob(blob: Blob, fileName: string): void {
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = href;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(href);
+}

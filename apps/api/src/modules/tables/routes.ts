@@ -1,14 +1,15 @@
-// Dining tables and their QR codes (PRD FR-010 … FR-017; design/07 §5).
+// Dining tables and their QR codes (PRD FR-010 … FR-018; design/07 §5).
 //
 // Tenant scope comes from the authenticated membership and RLS, never from the
 // request: none of these routes accept a restaurant id.
+import { randomBytes } from 'node:crypto';
 import { Router, type Request } from 'express';
 import { z } from 'zod';
 import QRCode from 'qrcode';
 import { can } from '@dineflow/shared';
 import type pg from 'pg';
 import type { Database } from '../../lib/db.ts';
-import { badRequest, conflict, notFound } from '../../lib/errors.ts';
+import { AppError, badRequest, conflict, notFound } from '../../lib/errors.ts';
 import { authenticate, requirePermission, staffPrincipal } from '../../middleware/context.ts';
 import type { Verifier } from '../../auth/jwt.ts';
 import { signQrToken, type QrKeyring } from '../../lib/qr-token.ts';
@@ -28,12 +29,29 @@ export type TableDeps = {
 const tableNumber = z.string().trim().min(1).max(20);
 const tableName = z.string().trim().min(1).max(60);
 const capacity = z.number().int().min(1).max(100);
+// Staff-only notes (FR-011). Never part of anything a customer can reach.
+const tableNotes = z.string().trim().min(1).max(500);
 
-const createBody = z.object({ tableNumber, name: tableName.nullish(), capacity }).strict();
+const createBody = z.object({ tableNumber, name: tableName.nullish(), notes: tableNotes.nullish(), capacity }).strict();
 const updateBody = z
-  .object({ tableNumber: tableNumber.optional(), name: tableName.nullish(), capacity: capacity.optional(),
-            version: z.number().int().min(1) })
+  .object({ tableNumber: tableNumber.optional(), name: tableName.nullish(), notes: tableNotes.nullish(),
+            capacity: capacity.optional(), version: z.number().int().min(1) })
   .strict();
+
+// Bulk creation (FR-018): "T" + 1…20 makes T1 … T20. Capped so one request stays one
+// quick transaction, and all-or-nothing so a clash leaves no half-made range behind.
+const MAX_BULK_TABLES = 100;
+const bulkBody = z
+  .object({
+    prefix: z.string().trim().max(10).default(''),
+    from: z.number().int().min(0).max(9999),
+    to: z.number().int().min(0).max(9999),
+    capacity,
+  })
+  .strict()
+  .refine((body) => body.to >= body.from, { path: ['to'], message: 'Must not be less than the first number.' })
+  .refine((body) => body.to - body.from + 1 <= MAX_BULK_TABLES,
+    { path: ['to'], message: `At most ${MAX_BULK_TABLES} tables at a time.` });
 const statusBody = z
   .object({ status: z.enum(['active', 'inactive']), reason: z.string().trim().max(200).optional(),
             version: z.number().int().min(1) })
@@ -70,7 +88,7 @@ function duplicateNumber(error: unknown): never {
 }
 
 type TableRow = {
-  id: string; table_number: string; name: string | null; capacity: number;
+  id: string; table_number: string; name: string | null; notes: string | null; capacity: number;
   status: 'active' | 'inactive'; version: number; created_at: Date; updated_at: Date;
   qr_issued_at?: Date | null;
 };
@@ -79,6 +97,7 @@ const present = (row: TableRow, withQr: boolean) => ({
   id: row.id,
   tableNumber: row.table_number,
   name: row.name,
+  notes: row.notes,
   capacity: row.capacity,
   status: row.status,
   version: row.version,
@@ -105,9 +124,13 @@ export function tableRoutes(deps: TableDeps): Router {
        JSON.stringify(summary), req.clientIp, req.requestId]);
   };
 
-  /** The printable form of a live QR. The token is derived here and never stored. */
+  /** The link a live QR encodes. The token is derived here and never stored. */
+  const qrUrl = (row: { qr_id: string; key_id: number }) =>
+    `${appBaseUrl.replace(/\/$/, '')}/t/${signQrToken(qrKeys, row.qr_id, row.key_id)}`;
+
+  /** The printable form of a live QR. */
   const qrPayload = async (row: { qr_id: string; key_id: number; created_at: Date }) => {
-    const url = `${appBaseUrl.replace(/\/$/, '')}/t/${signQrToken(qrKeys, row.qr_id, row.key_id)}`;
+    const url = qrUrl(row);
     const svg = await QRCode.toString(url, { type: 'svg', errorCorrectionLevel: 'H', margin: 2 });
     return { url, svg, issuedAt: row.created_at, provisional: !qrDomainFinal };
   };
@@ -121,7 +144,7 @@ export function tableRoutes(deps: TableDeps): Router {
 
       const rows = await db.asStaff(principal, async (client) => {
         const result = await client.query<TableRow>(
-          `select t.id, t.table_number, t.name, t.capacity, t.status, t.version, t.created_at, t.updated_at,
+          `select t.id, t.table_number, t.name, t.notes, t.capacity, t.status, t.version, t.created_at, t.updated_at,
                   (select q.created_at from table_qr_tokens q
                     where q.table_id = t.id and q.revoked_at is null) as qr_issued_at
              from dining_tables t
@@ -142,6 +165,121 @@ export function tableRoutes(deps: TableDeps): Router {
     }
   });
 
+  // ------------------------------------------------------------------ QR sheet
+  /**
+   * Every printable code, for the A4 sheet (FR-015): active tables with a live QR,
+   * in this restaurant only. Also says how many active tables still lack a code, so
+   * the sheet can offer to generate them rather than silently leaving gaps.
+   */
+  router.get('/qr-sheet', requirePermission('qr.read'), async (req, res, next) => {
+    try {
+      const principal = staffPrincipal(req);
+      const data = await db.asStaff(principal, async (client) => {
+        const restaurant = await client.query<{ name: string }>(
+          'select name from restaurants where id = $1', [principal.restaurantId]);
+        const codes = await client.query<{
+          table_number: string; name: string | null; qr_id: string; key_id: number; created_at: Date;
+        }>(
+          `select t.table_number, t.name, q.qr_id, q.key_id, q.created_at
+             from dining_tables t
+             join table_qr_tokens q on q.table_id = t.id and q.revoked_at is null
+            where t.status = 'active'
+            order by t.created_at, t.id
+            limit $1`, [MAX_TABLES_LISTED]);
+        const missing = await client.query<{ count: string }>(
+          `select count(*) from dining_tables t
+            where t.status = 'active'
+              and not exists (select 1 from table_qr_tokens q where q.table_id = t.id and q.revoked_at is null)`);
+        return { restaurantName: restaurant.rows[0]?.name ?? '', codes: codes.rows, missing: Number(missing.rows[0]!.count) };
+      });
+
+      const cards = await Promise.all(data.codes.map(async (row) => {
+        const qr = await qrPayload(row);
+        return { tableNumber: row.table_number, name: row.name, url: qr.url, svg: qr.svg };
+      }));
+      res.status(200).json({
+        restaurantName: data.restaurantName,
+        provisional: !qrDomainFinal,
+        cards,
+        activeTablesWithoutQr: data.missing,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // -------------------------------------------------------------------- bulk
+  router.post('/bulk', requirePermission('table.write'), async (req, res, next) => {
+    try {
+      const principal = staffPrincipal(req);
+      const body = parse(bulkBody, req.body);
+      const numbers = Array.from({ length: body.to - body.from + 1 }, (_, i) => `${body.prefix}${body.from + i}`);
+      if (numbers.some((number) => number.length > 20)) {
+        throw badRequest('VALIDATION_FAILED', 'Please check the details you entered.',
+          [{ field: 'prefix', message: 'Table numbers must be 20 characters or fewer.' }]);
+      }
+
+      const rows = await db.asStaff(principal, async (client) => {
+        // Named up front, so the answer can say which numbers clash. The unique
+        // index still decides if another request slips in between.
+        const clashes = await client.query<{ table_number: string }>(
+          `select table_number from dining_tables where lower(table_number) = any($1::text[])`,
+          [numbers.map((number) => number.toLowerCase())]);
+        if ((clashes.rowCount ?? 0) > 0) {
+          throw new AppError(409, 'TABLE_NUMBER_TAKEN', 'Some of those table numbers are already used.',
+            clashes.rows.map((row) => ({ field: 'tableNumber', message: row.table_number })));
+        }
+        const created = await client
+          .query<TableRow>(
+            `insert into dining_tables (restaurant_id, table_number, capacity)
+             select $1, number, $3 from unnest($2::text[]) with ordinality as n(number, position)
+              order by position
+             returning id, table_number, name, notes, capacity, status, version, created_at, updated_at`,
+            [principal.restaurantId, numbers, body.capacity])
+          .catch(duplicateNumber);
+        for (const table of created.rows) {
+          await audit(client, req, 'table.created', table.id,
+            { tableNumber: table.table_number, capacity: table.capacity, bulk: true });
+        }
+        return created.rows;
+      });
+
+      const withQr = can(principal, 'qr.read');
+      res.status(201).json({ tables: rows.map((row) => present({ ...row, qr_issued_at: null }, withQr)) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // ---------------------------------------------------- generate missing QRs
+  /** Issues a code for every active table that has none. Existing codes are untouched. */
+  router.post('/qr/issue-missing', requirePermission('qr.rotate'), async (req, res, next) => {
+    try {
+      const principal = staffPrincipal(req);
+      const issued = await db.asStaff(principal, async (client) => {
+        // Locks the tables it will issue for, in a fixed order, so it cannot race a
+        // single-table generate into a second live code (the unique index backs this).
+        const needing = await client.query<{ id: string }>(
+          `select t.id from dining_tables t
+            where t.status = 'active'
+              and not exists (select 1 from table_qr_tokens q where q.table_id = t.id and q.revoked_at is null)
+            order by t.id
+            for update of t`);
+        let count = 0;
+        for (const { id } of needing.rows) {
+          if (await liveQr(client, id)) continue;
+          await issueQr(client, req, id);
+          await audit(client, req, 'table.qr.issued', id, { bulk: true });
+          count += 1;
+        }
+        return count;
+      });
+      res.status(200).json({ issued });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // ---------------------------------------------------------------------- one
   router.get('/:id', requirePermission('table.read'), async (req, res, next) => {
     try {
@@ -149,7 +287,7 @@ export function tableRoutes(deps: TableDeps): Router {
       const id = tableId(req);
       const row = await db.asStaff(principal, async (client) => {
         const result = await client.query<TableRow>(
-          `select t.id, t.table_number, t.name, t.capacity, t.status, t.version, t.created_at, t.updated_at,
+          `select t.id, t.table_number, t.name, t.notes, t.capacity, t.status, t.version, t.created_at, t.updated_at,
                   (select q.created_at from table_qr_tokens q
                     where q.table_id = t.id and q.revoked_at is null) as qr_issued_at
              from dining_tables t where t.id = $1`, [id]);
@@ -171,10 +309,10 @@ export function tableRoutes(deps: TableDeps): Router {
       const row = await db.asStaff(principal, async (client) => {
         const result = await client
           .query<TableRow>(
-            `insert into dining_tables (restaurant_id, table_number, name, capacity)
-             values ($1, $2, $3, $4)
-             returning id, table_number, name, capacity, status, version, created_at, updated_at`,
-            [principal.restaurantId, body.tableNumber, body.name ?? null, body.capacity])
+            `insert into dining_tables (restaurant_id, table_number, name, notes, capacity)
+             values ($1, $2, $3, $4, $5)
+             returning id, table_number, name, notes, capacity, status, version, created_at, updated_at`,
+            [principal.restaurantId, body.tableNumber, body.name ?? null, body.notes ?? null, body.capacity])
           .catch(duplicateNumber);
         const created = result.rows[0]!;
         await audit(client, req, 'table.created', created.id,
@@ -204,11 +342,12 @@ export function tableRoutes(deps: TableDeps): Router {
                table_number = coalesce($2, table_number),
                name = case when $3::boolean then $4 else name end,
                capacity = coalesce($5, capacity),
+               notes = case when $7::boolean then $8 else notes end,
                version = version + 1
              where id = $1 and version = $6
-             returning id, table_number, name, capacity, status, version, created_at, updated_at`,
+             returning id, table_number, name, notes, capacity, status, version, created_at, updated_at`,
             [id, body.tableNumber ?? null, body.name !== undefined, body.name ?? null,
-             body.capacity ?? null, body.version])
+             body.capacity ?? null, body.version, body.notes !== undefined, body.notes ?? null])
           .catch(duplicateNumber);
 
         if (result.rowCount === 0) {
@@ -241,7 +380,7 @@ export function tableRoutes(deps: TableDeps): Router {
         const result = await client.query<TableRow>(
           `update dining_tables set status = $2, version = version + 1
             where id = $1 and version = $3
-            returning id, table_number, name, capacity, status, version, created_at, updated_at`,
+            returning id, table_number, name, notes, capacity, status, version, created_at, updated_at`,
           [id, body.status, body.version]);
 
         if (result.rowCount === 0) {
@@ -280,9 +419,9 @@ export function tableRoutes(deps: TableDeps): Router {
   const issueQr = async (client: pg.PoolClient, req: Request, id: string) => {
     const principal = staffPrincipal(req);
     const result = await client.query<{ qr_id: string; key_id: number; created_at: Date }>(
-      `insert into table_qr_tokens (restaurant_id, table_id, key_id, created_by)
-       values ($1, $2, $3, $4) returning qr_id, key_id, created_at`,
-      [principal.restaurantId, id, qrKeys.currentKid, principal.userId]);
+      `insert into table_qr_tokens (restaurant_id, table_id, qr_id, key_id, created_by)
+       values ($1, $2, $3, $4, $5) returning qr_id, key_id, created_at`,
+      [principal.restaurantId, id, randomQrId(), qrKeys.currentKid, principal.userId]);
     return result.rows[0]!;
   };
 
@@ -297,6 +436,34 @@ export function tableRoutes(deps: TableDeps): Router {
       });
       if (!qr) throw notFound('This table has no QR code yet.');
       res.status(200).json({ qr: await qrPayload(qr) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  /**
+   * The live QR as a PNG file (FR-015), for print shops and apps that do not take
+   * SVG. Same code, same link; only the file format differs.
+   */
+  router.get('/:id/qr/png', requirePermission('qr.read'), async (req, res, next) => {
+    try {
+      const principal = staffPrincipal(req);
+      const id = tableId(req);
+      const found = await db.asStaff(principal, async (client) => {
+        const table = await client.query<{ table_number: string }>(
+          'select table_number from dining_tables where id = $1', [id]);
+        if (table.rowCount === 0) throw notFound();
+        return { tableNumber: table.rows[0]!.table_number, qr: await liveQr(client, id) };
+      });
+      if (!found.qr) throw notFound('This table has no QR code yet.');
+
+      const png = await QRCode.toBuffer(qrUrl(found.qr),
+        { type: 'png', errorCorrectionLevel: 'H', margin: 2, width: 1024 });
+      const fileName = `table-${found.tableNumber.replace(/[^A-Za-z0-9-]+/g, '-')}-qr.png`;
+      res.status(200)
+        .set('content-type', 'image/png')
+        .set('content-disposition', `attachment; filename="${fileName}"`)
+        .send(png);
     } catch (error) {
       next(error);
     }
@@ -364,6 +531,15 @@ export function tableRoutes(deps: TableDeps): Router {
   });
 
   return router;
+}
+
+/**
+ * A fresh qr_id: 128 random bits in uuid form (NFR-S13). gen_random_uuid() would
+ * give a version-4 uuid, which fixes 6 of those bits and leaves only 122 random.
+ */
+function randomQrId(): string {
+  const hex = randomBytes(16).toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 /** Search text is matched literally: % and _ typed by a user are not wildcards. */

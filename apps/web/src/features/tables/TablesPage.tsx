@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus, QrCode, Search, Table2 } from 'lucide-react';
+import { useNavigate } from 'react-router';
+import { ListPlus, Plus, Printer, QrCode, Search, Table2 } from 'lucide-react';
 import { Page } from '@/app/AppShell.tsx';
 import { Badge, Button, Card, Dialog, EmptyState, Field, Input, Skeleton } from '@/components/ui/index.ts';
 import { ApiError, apiFetch } from '@/lib/api.ts';
@@ -7,6 +8,7 @@ import { useSession } from '@/features/auth/SessionProvider.tsx';
 import { naturalOrder, tablesApi, type DiningTable, type TableStatus } from './api.ts';
 import { TableFormDialog } from './TableFormDialog.tsx';
 import { QrDialog } from './QrDialog.tsx';
+import { BulkTablesDialog } from './BulkTablesDialog.tsx';
 
 type Load =
   | { kind: 'loading' }
@@ -17,6 +19,7 @@ type Filter = 'all' | TableStatus;
 
 export function TablesPage() {
   const { may } = useSession();
+  const navigate = useNavigate();
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
   const [restaurantName, setRestaurantName] = useState('');
   const [search, setSearch] = useState('');
@@ -24,6 +27,8 @@ export function TablesPage() {
 
   const [editing, setEditing] = useState<DiningTable | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [qrFor, setQrFor] = useState<DiningTable | null>(null);
   const [statusFor, setStatusFor] = useState<DiningTable | null>(null);
 
@@ -67,13 +72,31 @@ export function TablesPage() {
     <Page
       title="Tables & QR"
       description={load.kind === 'ready' ? `${active} active of ${total} tables` : 'Your tables and the codes customers scan.'}
-      actions={canWrite ? (
-        <Button variant="primary" iconLeft={<Plus className="size-4" />}
-          onClick={() => { setEditing(null); setFormOpen(true); }}>
-          Add table
-        </Button>
+      actions={canWrite || canSeeQr ? (
+        <div className="flex flex-wrap gap-2">
+          {canSeeQr ? (
+            <Button iconLeft={<Printer className="size-4" />} onClick={() => navigate('/tables/qr-sheet')}>
+              QR sheet
+            </Button>
+          ) : null}
+          {canWrite ? (
+            <>
+              <Button iconLeft={<ListPlus className="size-4" />} onClick={() => setBulkOpen(true)}>
+                Add several
+              </Button>
+              <Button variant="primary" iconLeft={<Plus className="size-4" />}
+                onClick={() => { setEditing(null); setFormOpen(true); }}>
+                Add table
+              </Button>
+            </>
+          ) : null}
+        </div>
       ) : undefined}
     >
+      {notice ? (
+        <p role="status" className="mb-3 rounded-md bg-success-bg px-3 py-2 text-sm font-medium text-success">{notice}</p>
+      ) : null}
+
       {load.kind === 'loading' ? (
         <div aria-busy="true" className="space-y-2">
           <span className="sr-only">Loading your tables</span>
@@ -99,10 +122,15 @@ export function TablesPage() {
             title="No tables yet"
             description="Add a table for each place customers sit. Each one gets its own QR code."
             action={canWrite ? (
-              <Button variant="primary" iconLeft={<Plus className="size-4" />}
-                onClick={() => { setEditing(null); setFormOpen(true); }}>
-                Add your first table
-              </Button>
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button variant="primary" iconLeft={<Plus className="size-4" />}
+                  onClick={() => { setEditing(null); setFormOpen(true); }}>
+                  Add your first table
+                </Button>
+                <Button iconLeft={<ListPlus className="size-4" />} onClick={() => setBulkOpen(true)}>
+                  Add several
+                </Button>
+              </div>
             ) : undefined}
           />
         </Card>
@@ -156,6 +184,11 @@ export function TablesPage() {
                         {table.capacity} {table.capacity === 1 ? 'seat' : 'seats'}
                         {canSeeQr ? (table.qr ? ' · QR code issued' : ' · No QR code') : ''}
                       </p>
+                      {table.notes ? (
+                        <p className="mt-0.5 line-clamp-2 text-xs text-muted">
+                          <span className="sr-only">Notes: </span>{table.notes}
+                        </p>
+                      ) : null}
                     </div>
 
                     <Badge tone={table.status === 'active' ? 'success' : 'neutral'}>
@@ -197,6 +230,15 @@ export function TablesPage() {
         table={editing}
         onClose={() => setFormOpen(false)}
         onSaved={() => { setFormOpen(false); void refresh(); }}
+      />
+      <BulkTablesDialog
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        onSaved={(created) => {
+          setBulkOpen(false);
+          setNotice(`${created} ${created === 1 ? 'table' : 'tables'} added.`);
+          void refresh();
+        }}
       />
       <QrDialog
         open={qrFor !== null}

@@ -29,6 +29,7 @@ export type Fixtures = {
 export async function seed(admin: pg.Client): Promise<Fixtures> {
   await admin.query(`
     truncate audit_log, invitations, auth_lockouts, support_grants, restaurant_users,
+             menu_items, menu_categories,
              table_qr_tokens, dining_tables, tax_components, restaurant_settings,
              platform_admins, restaurants restart identity cascade;
   `);
@@ -119,6 +120,18 @@ export async function seed(admin: pg.Client): Promise<Fixtures> {
     await admin.query(
       `insert into table_qr_tokens (restaurant_id, table_id, key_id, created_by) values ($1, $2, 1, $3)`,
       [rid, tbl[0]!.id, owner]);
+  }
+
+  // One shown category with one shown item per restaurant, carrying the marker, so
+  // both staff and customer probes have a menu row that could leak.
+  for (const [rid, marker] of [[restaurantA, MARKER.A], [restaurantB, MARKER.B],
+                               [restaurantS, MARKER.S], [restaurantP, MARKER.P]] as const) {
+    const { rows: cat } = await admin.query<{ id: string }>(
+      `insert into menu_categories (restaurant_id, name, sort_order) values ($1, $2, 1) returning id`,
+      [rid, `${marker} Starters`]);
+    await admin.query(
+      `insert into menu_items (restaurant_id, category_id, name, price_minor, diet)
+       values ($1, $2, $3, 24900, 'veg')`, [rid, cat[0]!.id, `${marker} Paneer Tikka`]);
   }
 
   // A pending invitation per restaurant, so isolation probes have something to leak.

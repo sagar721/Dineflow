@@ -366,13 +366,11 @@ describe('public QR resolution', () => {
   });
 
   test('public entry is rate limited', async () => {
+    // Sent together: each rejection waits out the timing floor, and the limiter
+    // counts requests as they arrive, not as they finish.
     const ip = '198.51.100.200';
-    let limited = false;
-    for (let i = 0; i < 125; i += 1) {
-      const res = await publicEntry('x'.repeat(44), ip);
-      if (res.status === 429) { limited = true; break; }
-    }
-    assert.ok(limited);
+    const responses = await Promise.all(Array.from({ length: 125 }, () => publicEntry('x'.repeat(44), ip)));
+    assert.ok(responses.some((res) => res.status === 429));
   });
 
   test('tokens never reach the logs, even when the request fails', async () => {

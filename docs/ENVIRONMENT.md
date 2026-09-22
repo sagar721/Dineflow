@@ -22,6 +22,7 @@ No value in this file is ever logged, returned in a response, or committed. Secr
 | `QR_SIGNING_KEYS` | **yes** | `1:<SECRET_1>` | Keys that sign table QR tokens: comma-separated `kid:secret`, each secret at least 32 random bytes as strict base64url without padding. **API service only.** The API refuses to start on a missing, empty, short, non-base64url, whitespace-containing, duplicated or non-random key; there is no fallback; errors never echo key material. One key per environment. Procedure, Render setup, rotation and compromise: [runbooks/qr-signing-key.md](runbooks/qr-signing-key.md). |
 | `QR_SIGNING_KEY_ID` | no | `2` | Which key signs new codes. Defaults to the highest key id; an empty value counts as unset. |
 | `QR_DOMAIN_FINAL` | no | `false` | Until `true`, QR cards are marked provisional and download and print are disabled, because a laminated card cannot be changed if the domain does. |
+| `MENU_IMAGE_BUCKET` | no | *(unset)* | Supabase Storage bucket for menu photos: **public-read**, written only by the API with the service key. Unset switches photo upload off (it answers 503); the rest of the menu works. **API service only.** See [modules/04-menu.md](modules/04-menu.md). |
 | `LOG_LEVEL` | no | `info` | `silent` \| `fatal` \| `error` \| `warn` \| `info` \| `debug` \| `trace`. |
 
 ## Web (`apps/web`)

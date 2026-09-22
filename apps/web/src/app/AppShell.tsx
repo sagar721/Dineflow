@@ -13,7 +13,7 @@ const NAV: NavItem[] = [
   { to: '/orders', label: 'Orders', icon: ClipboardList },
   { to: '/kitchen', label: 'Kitchen', icon: ChefHat },
   { to: '/tables', label: 'Tables & QR', icon: QrCode, ready: true },
-  { to: '/menu', label: 'Menu', icon: BookOpen },
+  { to: '/menu', label: 'Menu', icon: BookOpen, ready: true },
   { to: '/billing', label: 'Billing', icon: Receipt },
   { to: '/staff', label: 'Staff', icon: Users },
   { to: '/settings', label: 'Settings', icon: Settings },

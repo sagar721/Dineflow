@@ -14,7 +14,10 @@ import { staffRoutes } from './modules/staff/routes.ts';
 import { platformRoutes } from './modules/platform/routes.ts';
 import { restaurantRoutes } from './modules/restaurant/routes.ts';
 import { tableRoutes } from './modules/tables/routes.ts';
-import { publicRoutes } from './modules/public/routes.ts';
+import { publicRoutes, type PublicMenu } from './modules/public/routes.ts';
+import { menuRoutes } from './modules/menu/routes.ts';
+import { SupabaseImageStore, type ImageStore } from './lib/image-store.ts';
+import { MenuCache } from './lib/menu-cache.ts';
 import { parseKeyring } from './lib/qr-token.ts';
 import { notFound } from './lib/errors.ts';
 
@@ -28,6 +31,8 @@ export type AppDeps = {
   sendInvitationEmail?: (to: string, link: string) => Promise<void>;
   /** See PlatformDeps: only for operators with no email provider yet. */
   revealInvitationLink?: boolean;
+  /** Where menu images go. Defaults to Supabase Storage when MENU_IMAGE_BUCKET is set. */
+  imageStore?: ImageStore | null;
 };
 
 export type BuiltApp = { app: Express; db: Database; logger: Logger };
@@ -51,6 +56,12 @@ export function buildApp(deps: AppDeps): BuiltApp {
   // surfacing on the first QR a restaurant tries to print.
   const qrKeys = parseKeyring(config.QR_SIGNING_KEYS, config.QR_SIGNING_KEY_ID);
 
+  const imageStore = deps.imageStore !== undefined ? deps.imageStore
+    : config.MENU_IMAGE_BUCKET
+      ? new SupabaseImageStore({ url: config.SUPABASE_URL, serviceKey: config.SUPABASE_SERVICE_KEY, bucket: config.MENU_IMAGE_BUCKET })
+      : null;
+  const menuCache = new MenuCache<PublicMenu>();
+
   const app = express();
   app.disable('x-powered-by');
   // Client IP is resolved from a configured hop count in our own middleware, so
@@ -60,6 +71,12 @@ export function buildApp(deps: AppDeps): BuiltApp {
   app.use(requestContext(config.TRUST_PROXY_HOPS));
   app.use(securityHeaders());
   app.use(cors(config.WEB_ORIGIN));
+  // Menu image uploads carry the file as base64 in JSON (up to 5 MB decoded), so that
+  // one route gets a larger limit — and only for requests that carry a session
+  // cookie, so an anonymous caller cannot make the server buffer 8 MB.
+  const uploadJson = express.json({ limit: '8mb' });
+  app.use(/^\/api\/v1\/restaurant\/menu\/items\/[^/]+\/image$/, (req, res, next) =>
+    (/(?:^|;\s*)(?:__Host-)?df_at=/.test(req.headers.cookie ?? '') ? uploadJson(req, res, next) : next()));
   app.use(express.json({ limit: '100kb' }));
   app.use(csrfGuard(config.WEB_ORIGIN));
 
@@ -97,7 +114,10 @@ export function buildApp(deps: AppDeps): BuiltApp {
     qrKeys,
     qrDomainFinal: config.QR_DOMAIN_FINAL,
   }));
-  app.use('/api/v1/public', publicRoutes({ db, limiter, qrKeys }));
+  app.use('/api/v1/restaurant/menu', menuRoutes({
+    db, verify, cookieSecure: config.COOKIE_SECURE, logger, imageStore, menuCache,
+  }));
+  app.use('/api/v1/public', publicRoutes({ db, limiter, qrKeys, imageStore, menuCache }));
   app.use('/api/v1/restaurant', restaurantRoutes({
     db, verify, cookieSecure: config.COOKIE_SECURE,
   }));

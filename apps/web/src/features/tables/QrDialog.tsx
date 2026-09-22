@@ -97,7 +97,7 @@ export function QrDialog({ open, table, restaurantName, onClose, onChanged }: Pr
             </p>
           ) : null}
 
-          <QrCard qr={state.qr} restaurantName={restaurantName} tableNumber={table.tableNumber} tableName={table.name} />
+          <QrCard qr={state.qr} tableId={table.id} restaurantName={restaurantName} tableNumber={table.tableNumber} tableName={table.name} />
 
           {canRotate ? (
             confirming ? (

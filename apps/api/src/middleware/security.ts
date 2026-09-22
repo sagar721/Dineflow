@@ -113,6 +113,21 @@ export function errorHandler(logger: Logger) {
       return;
     }
 
+    // The JSON body parser's own refusals are the client's doing, not ours: say so
+    // with the right status instead of a 500 (and without the parser's message).
+    const parserError = (error as { type?: string }).type;
+    if (parserError === 'entity.too.large' || parserError === 'entity.parse.failed') {
+      const tooLarge = parserError === 'entity.too.large';
+      res.status(tooLarge ? 413 : 400).json({
+        error: {
+          code: tooLarge ? 'PAYLOAD_TOO_LARGE' : 'INVALID_JSON',
+          message: tooLarge ? 'That request is too large.' : 'That request could not be read.',
+          requestId: req.requestId,
+        },
+      });
+      return;
+    }
+
     logger.error(
       { requestId: req.requestId, route: req.route?.path ?? req.path, err: error },
       'unhandled error',

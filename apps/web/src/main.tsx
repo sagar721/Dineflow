@@ -11,6 +11,8 @@ import { RequireAuth } from '@/features/auth/RequireAuth.tsx';
 import { SessionProvider } from '@/features/auth/SessionProvider.tsx';
 import { OnboardingPage } from '@/features/onboarding/OnboardingPage.tsx';
 import { TablesPage } from '@/features/tables/TablesPage.tsx';
+import { QrSheetPage } from '@/features/tables/QrSheetPage.tsx';
+import { MenuPage } from '@/features/menu/MenuPage.tsx';
 import { TableEntryPage } from '@/features/public/TableEntryPage.tsx';
 import { SecurityPage } from '@/features/auth/SecurityPage.tsx';
 import { ResetPasswordPage } from '@/features/auth/ResetPasswordPage.tsx';
@@ -32,6 +34,11 @@ createRoot(root).render(
           {/* What a customer's phone opens after scanning a table's QR code. No
               session, no app shell: a customer is not a member of staff. */}
           <Route path="/t/:token" element={<TableEntryPage />} />
+          {/* Outside the shell so that printing gives only the cards. */}
+          <Route
+            path="/tables/qr-sheet"
+            element={<RequireAuth permission="qr.read"><QrSheetPage /></RequireAuth>}
+          />
 
           <Route
             path="*"
@@ -43,6 +50,10 @@ createRoot(root).render(
                   <Route
                     path="/tables"
                     element={<RequireAuth permission="table.read"><TablesPage /></RequireAuth>}
+                  />
+                  <Route
+                    path="/menu"
+                    element={<RequireAuth permission="menu.read"><MenuPage /></RequireAuth>}
                   />
                   <Route
                     path="/setup"

@@ -185,6 +185,19 @@
   .qr-print-card * {
     visibility: visible;
   }
+  /* The A4 sheet: three cards across, none split over a page break. */
+  .qr-sheet {
+    page: qr-sheet;
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 6mm !important;
+  }
+  .qr-sheet-card {
+    break-inside: avoid;
+    border: 1px dashed #000 !important;
+    border-radius: 0 !important;
+  }
+
   .qr-print-card {
     position: fixed;
     inset: 0;
@@ -193,4 +206,11 @@
     width: 80mm;
     height: fit-content;
   }
+}
+
+/* Named page for the QR sheet, so its A4 size does not apply to other printouts
+   such as 80 mm bills. */
+@page qr-sheet {
+  size: A4 portrait;
+  margin: 10mm;
 }

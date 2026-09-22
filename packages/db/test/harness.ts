@@ -121,6 +121,15 @@ function insertFor(spec: TableSpec, restaurantId: string, userId: string, acting
       return { sql: `insert into tax_components (restaurant_id, name, rate_bps)
                      values ($1, 'PROBE-${Math.random().toString(36).slice(2, 8)}', 500)`,
                params: [restaurantId] };
+    case 'menu_categories':
+      return { sql: `insert into menu_categories (restaurant_id, name) values ($1, $2)`,
+               params: [restaurantId, `PROBE-${Math.random().toString(36).slice(2, 8)}`] };
+    case 'menu_items':
+      // Aims at that restaurant's own category; under RLS a principal who cannot
+      // see it gets a null category_id, which is itself a refusal.
+      return { sql: `insert into menu_items (restaurant_id, category_id, name, price_minor)
+                     values ($1, (select id from menu_categories where restaurant_id = $1 limit 1), $2, 100)`,
+               params: [restaurantId, `PROBE-${Math.random().toString(36).slice(2, 8)}`] };
     default:
       throw new Error(`no insert probe declared for ${spec.table}`);
   }
@@ -151,6 +160,14 @@ function updateFor(spec: TableSpec, restaurantId: string): { sql: string; params
       return { sql: `update restaurant_settings set bill_footer = 'probe' where restaurant_id = $1`, params: [restaurantId] };
     case 'tax_components':
       return { sql: `update tax_components set rate_bps = 999 where restaurant_id = $1`, params: [restaurantId] };
+    case 'menu_categories':
+      return { sql: `update menu_categories set sort_order = sort_order + 1 where restaurant_id = $1`,
+               params: [restaurantId] };
+    case 'menu_items':
+      // A price change: the edit kitchen staff must never be able to make, even
+      // though they may update the row's availability.
+      return { sql: `update menu_items set price_minor = price_minor + 1 where restaurant_id = $1`,
+               params: [restaurantId] };
     default:
       throw new Error(`no update probe declared for ${spec.table}`);
   }
