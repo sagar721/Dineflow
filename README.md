@@ -1,77 +1,109 @@
 # DineFlow
 
-Multi-tenant QR ordering and basic billing for restaurants and cafés.
+**Multi-tenant restaurant platform — security-first foundation, in active development.**
 
-**Status: Stage 3 complete and awaiting approval.** The database foundation, the tenant-isolation harness and the design-system scaffold are built and verified. There is no API yet, so the dashboard shows clearly-labelled placeholder data.
+DineFlow is being developed to let restaurants manage menus, table QR codes, kitchen workflows and billing on one shared platform. The public repository currently contains the project specification, database-security foundation, tenant-isolation tests, backup/restore drill, shared logic and a web design-system scaffold.
 
-| What | Where |
-|---|---|
-| **Status report** | **[docs/STATUS.md](docs/STATUS.md)** |
-| Product requirements | [docs/PRD.md](docs/PRD.md) |
-| Technical design (7 parts) | [docs/design/](docs/design/) |
-| Conditions from the Stage 2 review | [docs/design/07-stage2-conditions.md](docs/design/07-stage2-conditions.md) |
-| Database migrations | [packages/db/migrations/](packages/db/migrations/) |
-| Tenant-isolation harness | [packages/db/test/](packages/db/test/) |
-| Restore drill | [scripts/restore-drill/](scripts/restore-drill/) |
-| Design system | [docs/design/08-design-system.md](docs/design/08-design-system.md) · [apps/web](apps/web) |
-| Shared logic (money, order states) | [packages/shared/src](packages/shared/src) |
+> **Current status:** customer-facing modules are not all complete. Read the implementation table below and `docs/STATUS.md` before treating any feature as implemented. Nothing in this README claims production deployment or production readiness.
 
-## Requirements
+## My role
 
-- Node 24 (see `.nvmrc`; 22.18+ also works). The repo runs TypeScript directly, with no build step for the API or the database package
-- Docker (for the disposable Postgres the tests use)
-- [`age`](https://github.com/FiloSottile/age) (backup encryption in the restore drill): `brew install age`
+I lead product definition and implementation review for this project, including the requirements, architecture and security verification approach. AI coding tools have assisted with implementation. The claims in this README should be checked against the code and verification records in the repository.
+
+## Implementation status
+
+The detailed verification report records its run on **2026-09-20**; counts below are historical results from that run, not a claim that the same checks have been rerun today.
+
+| Area | Status in the documented report | Source |
+|---|---|---|
+| Product requirements and user stories | Documented | [PRD](docs/PRD.md) |
+| Architecture, database design, API/auth design and threat model | Documented | [Design documents](docs/design/) |
+| PostgreSQL foundation and row-level security policies | Implemented and tested in the documented run | [Database migrations](packages/db/migrations/) |
+| Tenant-isolation harness | 408 checks reported passing in the dated report | [Database tests](packages/db/test/) |
+| Encrypted backup/restore drill | 15 checks reported passing in the dated report | [Restore drill](scripts/restore-drill/) |
+| Shared money and order-state logic | Implemented; see tests and code | [Shared package](packages/shared/src/) |
+| Web design system and dashboard scaffold | Implemented as a scaffold; dashboard data is labelled demo data | [Web app](apps/web/) |
+| API server | Work in progress in the documented README status | [API app](apps/api/) |
+| Authentication | Do not mark complete unless its code and tests are pushed to the reviewed branch and API tests pass | [API app](apps/api/) |
+| Tables and signed QR codes | Planned / not confirmed complete by the dated report | [Technical design](docs/design/02-api-auth-tenancy.md) |
+| Menu, ordering, kitchen workflow and billing | Not confirmed complete by the dated report | [Project plan](docs/design/05-project-structure.md) |
+| Deployment and production operations | Not confirmed complete by the dated report | — |
+
+## Architecture
+
+```text
+apps/
+  api/       Node.js + TypeScript API
+  web/       React + Vite web app
+packages/
+  db/        SQL migrations, migration runner and tenant-isolation harness
+  shared/    Money and order-state logic
+scripts/
+  restore-drill/  Encrypted backup/restore verification
+docs/        Product requirements, technical design and status
+```
+
+## Security and design principles
+
+- **Tenant isolation at the database layer:** PostgreSQL row-level security is part of the design; see the migrations and tests for the implementation.
+- **Adversarial verification:** the documented harness includes deliberate schema/policy sabotage checks intended to catch security regressions.
+- **Integer money arithmetic:** financial calculations should use integer minor units rather than floating-point amounts.
+- **Append-only audit trail and restore verification:** see migrations and the restore-drill implementation for the concrete mechanisms.
+
+## Tech stack
+
+TypeScript, Node.js, PostgreSQL, React, Vite, Docker and GitHub Actions. The project also documents Supabase integration and uses `age` for backup encryption in the restore drill.
 
 ## Getting started
 
+Requirements described by the repository include Node.js, Docker and `age`.
+
 ```bash
 npm install
-npm run db:up        # start a disposable Postgres on localhost:55432
-npm run db:migrate   # apply migrations
-npm run harness      # tenant-isolation harness (schema guards, matrix, canaries)
+npm run db:up
+npm run db:migrate
+npm run harness
 npm run restore-drill
-npm run db:down      # remove the container
+npm test
+npm run dev:web
+npm run db:down
 ```
 
-`npm run harness` exits non-zero on any failure and is the merge gate in CI.
+Check `.nvmrc`, `package.json` and the environment documentation in the current branch before running commands. Copy `.env.example` to `.env` if present and never commit real secrets.
 
-### Web app
+## Historical test results
 
-```bash
-npm run dev:api        # API on http://localhost:4000 (reads .env)
-npm run dev:web        # http://localhost:5180 — dedicated port, fails loudly if taken
-npm run build          # strict typecheck + production build
-npm test               # shared unit tests, token contrast, render smoke test
-```
+The status report dated **2026-09-20** records the following run:
 
-Two routes exist: `/` (dashboard) and `/design` (every component in every state, with a
-light/dark toggle for the kitchen theme). Every other route says plainly that its module
-has not been built.
+| Suite | Reported result |
+|---|---:|
+| Isolation matrix | 408 / 408 |
+| Sabotage canaries | 18 / 18 |
+| Restore drill | 15 / 15 |
+| Token contrast checks | 44 / 44 |
+| Render smoke test | 19 / 19 |
+| Shared unit tests, role hygiene, schema guards and request-context isolation | 5/5, 2/2, 1/1 and 3/3 |
+| Total reported automated checks | 528 |
 
-**Demo data:** the dashboard uses placeholder data from `demo-data.ts`, which refuses to
-load in a production build unless `VITE_ALLOW_DEMO_DATA` is set. The scaffold sets it in
-the build script; delete that flag when the orders module lands and the guard starts
-protecting customers automatically.
+These are historical results, not newly run checks. The report lists accessibility tooling/screen-reader passes, real-device checks, load tests and a production-shaped restore drill as not yet run.
 
-## What the harness checks
+## Documentation
 
-| Group | Question it answers |
-|---|---|
-| Role hygiene | Does the test connection itself run without the power to bypass RLS? (Otherwise every other result is meaningless.) |
-| Schema guards | Is the schema closed by default: RLS enabled *and* forced, no `USING (true)`, no grants to `anon`/`authenticated`/`service_role`/`PUBLIC`, `SECURITY DEFINER` functions reviewed and `search_path`-pinned, no owner-rights views? |
-| Isolation matrix | For every table × principal × command, does the database behave exactly as declared — and does any *undeclared* combination fail the run? |
-| Context isolation | Can a pooled connection carry one request's identity into the next? |
-| Canaries | If someone disables RLS, drops a policy, grants a table to `PUBLIC` or adds an unreviewed `SECURITY DEFINER` function, does the harness actually catch it? |
+- [Project status](docs/STATUS.md)
+- [Product requirements](docs/PRD.md)
+- [Technical design documents](docs/design/)
+- [Database migrations](packages/db/migrations/)
+- [Tenant-isolation tests](packages/db/test/)
+- [Restore drill](scripts/restore-drill/)
+- [Web app](apps/web/)
+- [API app](apps/api/)
 
-The canaries matter as much as the tests: a suite that has never been seen to fail is not evidence.
+## Limitations
 
-## Conventions
+- Do not treat the app as deployed or production-ready based on this repository alone.
+- The dated status report does not verify that customer-facing menu, ordering or billing modules are complete.
+- Tax/invoice rules and licensing terms require appropriate professional review before real-world use.
 
-- Money is stored and computed in **integer minor units**; no floating point anywhere.
-- Financial and audit rows are never deleted by application code.
-- Migrations are plain SQL, applied in order, recorded with a checksum, and written to be idempotent.
-- Every tenant table carries `restaurant_id`, has RLS forced, and appears in the isolation matrix.
+## Author
 
-## Not yet built
-
-API server, web app, QR tokens, menu, orders, billing, PDF, deployment. See the module plan in [docs/design/05-project-structure.md](docs/design/05-project-structure.md).
+**Sagar Kumar** — [GitHub](https://github.com/sagar721) · [LinkedIn](https://www.linkedin.com/in/sagar-kumar-1314a6379/)
